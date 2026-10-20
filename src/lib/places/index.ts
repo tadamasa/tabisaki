@@ -38,8 +38,9 @@ async function fetchOverpass(bbox: number[]): Promise<{ elements: OsmElement[]; 
   throw new Error(`OpenStreetMap の検索に失敗しました（${errors.join(" / ")}）`);
 }
 
+// Overpass は公共の窓口なので、結果は全インスタンスで共有するキャッシュに置く
 export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> {
-  "use cache";
+  "use cache: remote";
   cacheLife("days");
   cacheTag(ATLAS_TAG);
 
