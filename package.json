@@ -7,23 +7,24 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "build-data": "node scripts/build-data.mjs"
+    "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {
     "maplibre-gl": "^5.6.0",
     "next": "16.4.2",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1",
+    "exceljs": "^4.4.0",
+    "@turf/turf": "^7.2.0"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
-    "@turf/turf": "^7.2.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
-    "exceljs": "^4.4.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5"

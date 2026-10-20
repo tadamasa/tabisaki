@@ -2,14 +2,13 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import type { BlankArea, Spot, Summary } from "@/lib/types";
+import type { Atlas, Place } from "@/lib/types";
+import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
   loading: () => <div className="grid h-full place-items-center text-muted">地図を読み込み中…</div>,
 });
-
-type Data = { summary: Summary; areas: BlankArea[]; spots: Spot[] };
 
 const DISTANCES = [
   { km: 100, label: "100km" },
@@ -21,42 +20,86 @@ const DISTANCES = [
 const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
 
+async function fetchPlaces(areaId: string): Promise<NonNullable<PlacesState>> {
+  try {
+    const res = await fetch(`/api/areas/${encodeURIComponent(areaId)}/places`);
+    const body = await res.json();
+    return res.ok ? body : { error: body.error ?? `HTTP ${res.status}` };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function fetchAtlas(): Promise<Atlas> {
+  const res = await fetch("/api/atlas", { cache: "no-store" });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+  return body;
+}
+
 export default function Explorer() {
-  const [data, setData] = useState<Data | null>(null);
-  const [error, setError] = useState(false);
+  const [data, setData] = useState<Atlas | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [maxKm, setMaxKm] = useState(100);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 地帯ごとの神社・資料館の候補。開いたときに一度だけ取りに行く
+  const [places, setPlaces] = useState<Record<string, NonNullable<PlacesState>>>({});
+  const [focus, setFocus] = useState<Place | null>(null);
+
+  const load = () => fetchAtlas().then(setData, (e: Error) => setError(e.message));
 
   useEffect(() => {
-    Promise.all(
-      ["summary.json", "blank-areas.json", "spots.json"].map((f) =>
-        fetch(`/data/${f}`).then((r) => {
-          if (!r.ok) throw new Error(f);
-          return r.json();
-        }),
-      ),
-    )
-      .then(([summary, areas, spots]) => setData({ summary, areas, spots }))
-      .catch(() => setError(true));
+    fetchAtlas().then(setData, (e: Error) => setError(e.message));
   }, []);
+
+  const loadPlaces = (areaId: string) =>
+    fetchPlaces(areaId).then((r) => setPlaces((prev) => ({ ...prev, [areaId]: r })));
+
+  useEffect(() => {
+    if (selectedId && !places[selectedId]) loadPlaces(selectedId);
+    // places の変化では取り直さない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  // 縁泉に記録を足したあと、スプレッドシートを読み直す
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetch("/api/atlas/refresh", { method: "POST" });
+      setData(null);
+      setPlaces({});
+      await load();
+      // 開いたままの地帯は、その場で候補を取り直す
+      if (selectedId) loadPlaces(selectedId);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const areas = useMemo(
     () => (data?.areas ?? []).filter((a) => a.km < maxKm),
     [data, maxKm],
   );
   const selected = data?.areas.find((a) => a.id === selectedId) ?? null;
+  const selectedPlaces = selectedId ? places[selectedId] : undefined;
 
   if (error) {
     return (
       <main className="grid h-dvh place-items-center p-6 text-center">
         <div className="max-w-md space-y-3">
-          <h1 className="text-xl font-semibold">訪問データがまだありません</h1>
-          <p className="text-muted">
-            縁泉のエクスポートから地図用データを作ってください。
-          </p>
-          <code className="block rounded bg-surface p-3 text-sm">
-            npm run build-data -- --ensen path/to/ensen.xlsx
-          </code>
+          <h1 className="text-xl font-semibold">訪問データを読み込めませんでした</h1>
+          <p className="text-muted">{error}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              load();
+            }}
+            className="min-h-10 rounded-full border border-border px-4"
+          >
+            もう一度読み込む
+          </button>
         </div>
       </main>
     );
@@ -67,10 +110,11 @@ export default function Explorer() {
       <section className="relative h-[55dvh] shrink-0 md:order-2 md:h-full md:flex-1">
         {data ? (
           <MapView
-            home={data.summary.home}
-            spots={data.spots}
+            atlas={data}
             maxKm={maxKm}
             selected={selected}
+            places={selectedPlaces && !("error" in selectedPlaces) ? selectedPlaces : null}
+            focus={focus}
             onSelectArea={setSelectedId}
           />
         ) : (
@@ -80,7 +124,17 @@ export default function Explorer() {
 
       <aside className="flex min-h-0 flex-1 flex-col border-border bg-surface md:order-1 md:w-[380px] md:flex-none md:border-r">
         <header className="border-b border-border px-4 pb-3 pt-4">
-          <h1 className="text-lg font-semibold">次はどこへ</h1>
+          <div className="flex items-baseline justify-between gap-3">
+            <h1 className="text-lg font-semibold">次はどこへ</h1>
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={refreshing}
+              className="text-xs text-museum underline disabled:text-muted disabled:no-underline"
+            >
+              {refreshing ? "読み込み中…" : "縁泉の最新の記録を読む"}
+            </button>
+          </div>
           {data && (
             <p className="mt-1 text-sm text-muted">
               記録のある町 <strong className="text-foreground">{data.summary.visited}</strong> /{" "}
@@ -167,6 +221,18 @@ export default function Explorer() {
                           </li>
                         ))}
                       </ul>
+                      <AreaPlacesPanel
+                        state={selectedPlaces}
+                        onRetry={() => {
+                          setPlaces((prev) => {
+                            const next = { ...prev };
+                            delete next[a.id];
+                            return next;
+                          });
+                          loadPlaces(a.id);
+                        }}
+                        onFocus={setFocus}
+                      />
                       <p className="mt-3 text-sm">
                         <a
                           className="text-museum underline"
@@ -174,7 +240,7 @@ export default function Explorer() {
                           target="_blank"
                           rel="noreferrer"
                         >
-                          この地帯の神社をGoogleマップで見る
+                          ほかの神社もGoogleマップで見る
                         </a>
                       </p>
                     </div>
