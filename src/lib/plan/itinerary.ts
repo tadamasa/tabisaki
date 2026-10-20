@@ -101,6 +101,8 @@ export function insertKin(stops: Stop[], kin: Stop, home: [number, number], star
 export const clock = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
 
 // Google マップの経路（自宅発・自宅着、立ち寄りは9か所まで）
+export const MAPS_WAYPOINT_MAX = 9;
+
 export function googleMapsRoute(stops: Stop[], home: [number, number]) {
   const ll = ([lng, lat]: [number, number]) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
   const params = new URLSearchParams({
@@ -108,7 +110,7 @@ export function googleMapsRoute(stops: Stop[], home: [number, number]) {
     origin: ll(home),
     destination: ll(home),
     travelmode: "driving",
-    waypoints: stops.slice(0, 9).map((s) => ll(at(s.place))).join("|"),
+    waypoints: stops.slice(0, MAPS_WAYPOINT_MAX).map((s) => ll(at(s.place))).join("|"),
   });
   return `https://www.google.com/maps/dir/?${params}`;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { type Plan, type Role, type Stop, clock, googleMapsRoute } from "@/lib/plan/itinerary";
+import { MAPS_WAYPOINT_MAX, type Plan, type Role, type Stop, clock, googleMapsRoute } from "@/lib/plan/itinerary";
 import type { Place } from "@/lib/types";
 
 const ROLE_LABEL: Record<Role, string> = { primer: "予習", anchor: "本命", kin: "ゆかり" };
@@ -106,6 +106,9 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
           <a href={googleMapsRoute(stops, home)} target="_blank" rel="noreferrer" className="text-museum underline">
             Googleマップで経路を開く
           </a>
+          {stops.length > MAPS_WAYPOINT_MAX && (
+            <span className="text-shrine">Googleマップには最初の{MAPS_WAYPOINT_MAX}か所までしか渡せません。</span>
+          )}
           <span className="text-muted">時刻は直線距離からの目安です。</span>
         </p>
       )}
