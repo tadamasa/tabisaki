@@ -46,9 +46,38 @@ function EnNote({ en }: { en: En }) {
   );
 }
 
-type Props = { state: PlacesState; onRetry: () => void; onFocus: (p: Place) => void };
+type Props = {
+  state: PlacesState;
+  onRetry: () => void;
+  onFocus: (p: Place) => void;
+  // 行程の編集
+  planIds: Set<string>;
+  anchorId: string | null;
+  onAdd: (p: Place) => void;
+  onMakeAnchor: (p: Place) => void;
+};
 
-export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
+function PlanButtons({ place, planIds, anchorId, onAdd, onMakeAnchor }: Pick<Props, "planIds" | "anchorId" | "onAdd" | "onMakeAnchor"> & { place: Place }) {
+  if (place.id === anchorId) return <span className="shrink-0 text-xs text-shrine">本命</span>;
+  return (
+    <span className="flex shrink-0 gap-2 text-xs">
+      {place.kind === "shrine" && (
+        <button type="button" onClick={() => onMakeAnchor(place)} className="text-shrine underline">
+          本命にする
+        </button>
+      )}
+      {planIds.has(place.id) ? (
+        <span className="text-muted">行程に入っています</span>
+      ) : (
+        <button type="button" onClick={() => onAdd(place)} className="text-museum underline">
+          ＋行程
+        </button>
+      )}
+    </span>
+  );
+}
+
+export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Props) {
   if (!state) return <p className="mt-3 text-sm text-muted">この地帯の神社と資料館を探しています…</p>;
   if ("error" in state) {
     return (
@@ -83,6 +112,9 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
                   <button type="button" onClick={() => onFocus(a)} className="shrink-0 text-xs text-museum underline">
                     地図
                   </button>
+                </div>
+                <div className="mt-1 flex justify-end">
+                  <PlanButtons place={a} {...plan} />
                 </div>
                 {a.reasons.length > 0 && (
                   <ul className="mt-1 flex flex-wrap gap-1">
@@ -124,9 +156,12 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
                     {KIND_LABEL[p.kind]} ・ {p.town}
                   </span>
                 </span>
-                <button type="button" onClick={() => onFocus(p)} className="shrink-0 text-xs text-museum underline">
-                  地図
-                </button>
+                <span className="flex shrink-0 gap-2">
+                  <PlanButtons place={p} {...plan} />
+                  <button type="button" onClick={() => onFocus(p)} className="text-xs text-museum underline">
+                    地図
+                  </button>
+                </span>
               </li>
             ))}
           </ul>

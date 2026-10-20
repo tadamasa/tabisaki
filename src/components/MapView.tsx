@@ -2,6 +2,7 @@
 
 import maplibregl, { type FilterSpecification, type MapGeoJSONFeature } from "maplibre-gl";
 import { useEffect, useRef } from "react";
+import type { TimedStop } from "@/lib/plan/itinerary";
 import type { AreaPlaces, Atlas, BlankArea, MuniProps, Place, Spot } from "@/lib/types";
 
 type Props = {
@@ -9,6 +10,7 @@ type Props = {
   maxKm: number;
   selected: BlankArea | null;
   places: AreaPlaces | null;
+  route: { home: [number, number]; stops: TimedStop[] } | null;
   focus: Place | null;
   onSelectArea: (areaId: string | null) => void;
 };
@@ -66,12 +68,31 @@ function bboxOf(g: import("geojson").Polygon | import("geojson").MultiPolygon) {
 
 const formatDate = (ts: string | null) => (ts ? ts.slice(0, 10).replaceAll("-", "/") : "—");
 
-export default function MapView({ atlas, maxKm, selected, places, focus, onSelectArea }: Props) {
+const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: "#3b6fb6", anchor: "#c2412d", kin: "#e07a5f" };
+
+const routeData = (route: Props["route"]): import("geojson").FeatureCollection => ({
+  type: "FeatureCollection",
+  features: route
+    ? [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "LineString",
+            coordinates: [route.home, ...route.stops.map((s) => [s.place.lng, s.place.lat]), route.home],
+          },
+        },
+      ]
+    : [],
+});
+
+export default function MapView({ atlas, maxKm, selected, places, route, focus, onSelectArea }: Props) {
   const { home } = atlas.summary;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const townLabelsRef = useRef<maplibregl.Marker[]>([]);
   const placeMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
+  const routeMarkersRef = useRef<maplibregl.Marker[]>([]);
   const onSelectRef = useRef(onSelectArea);
   useEffect(() => {
     onSelectRef.current = onSelectArea;
@@ -316,6 +337,36 @@ export default function MapView({ atlas, maxKm, selected, places, focus, onSelec
       );
     }
   }, [places]);
+
+  // 行程の順路（自宅→各地点→自宅）を線と番号で出す。線は道ではなく、回る順の目安
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      const source = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
+      if (source) source.setData(routeData(route));
+      else {
+        map.addSource("route", { type: "geojson", data: routeData(route) });
+        map.addLayer({
+          id: "route",
+          type: "line",
+          source: "route",
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: { "line-color": "#23211c", "line-width": 2.5, "line-opacity": 0.7, "line-dasharray": [2, 1.5] },
+        });
+      }
+      routeMarkersRef.current.forEach((m) => m.remove());
+      routeMarkersRef.current = (route?.stops ?? []).map((s, i) => {
+        const el = document.createElement("div");
+        el.className = "pointer-events-none grid size-5 place-items-center rounded-full text-[11px] font-bold text-white ring-2 ring-white shadow";
+        el.style.backgroundColor = ROUTE_COLOR[s.role];
+        el.textContent = String(i + 1);
+        return new maplibregl.Marker({ element: el, offset: [10, -10] }).setLngLat([s.place.lng, s.place.lat]).addTo(map);
+      });
+    };
+    if (map.loaded() || map.getLayer("muni-line")) apply();
+    else map.once("load", apply);
+  }, [route]);
 
   useEffect(() => {
     const map = mapRef.current;

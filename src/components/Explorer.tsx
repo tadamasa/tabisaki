@@ -2,8 +2,10 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import type { Atlas, Place } from "@/lib/types";
+import { type Role, type Stop, insertKin, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import type { AreaPlaces, Atlas, Place } from "@/lib/types";
 import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
+import ItineraryPanel from "./ItineraryPanel";
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
@@ -19,6 +21,29 @@ const DISTANCES = [
 
 const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
+
+// 編集した行程は、この端末のブラウザに地帯ごとに覚えておく
+type SavedPlan = { stops: [string, Role][]; start: number };
+const PLANS_KEY = "tabisaki:plans";
+const DEFAULT_START = 8 * 60;
+
+function readPlans(): Record<string, SavedPlan> {
+  try {
+    return JSON.parse(localStorage.getItem(PLANS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writePlans(plans: Record<string, SavedPlan>) {
+  try {
+    localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
+  } catch {
+    // 保存できない環境では、開いている間だけ覚える
+  }
+}
+
+const AREA_PLACE = (ap: AreaPlaces) => new Map<string, Place>([...ap.anchors, ...ap.primers].map((p) => [p.id, p]));
 
 async function fetchPlaces(areaId: string): Promise<NonNullable<PlacesState>> {
   try {
@@ -46,6 +71,7 @@ export default function Explorer() {
   // 地帯ごとの神社・資料館の候補。開いたときに一度だけ取りに行く
   const [places, setPlaces] = useState<Record<string, NonNullable<PlacesState>>>({});
   const [focus, setFocus] = useState<Place | null>(null);
+  const [plans, setPlans] = useState<Record<string, SavedPlan>>(() => (typeof window === "undefined" ? {} : readPlans()));
 
   const load = () => fetchAtlas().then(setData, (e: Error) => setError(e.message));
 
@@ -83,6 +109,38 @@ export default function Explorer() {
   );
   const selected = data?.areas.find((a) => a.id === selectedId) ?? null;
   const selectedPlaces = selectedId ? places[selectedId] : undefined;
+  const home = data?.summary.home ?? ([135.5157, 34.7617] as [number, number]);
+  const loaded = selectedPlaces && !("error" in selectedPlaces) ? selectedPlaces : null;
+
+  // 保存した行程があればそれを、なければ本命の候補の一番目から組んだ行程を出す
+  const saved = loaded ? plans[loaded.areaId] : undefined;
+  const start = saved?.start ?? DEFAULT_START;
+  const stops: Stop[] = !loaded
+    ? []
+    : saved
+      ? saved.stops.flatMap(([id, role]) => {
+          const place = AREA_PLACE(loaded).get(id);
+          return place ? [{ place, role }] : [];
+        })
+      : suggestPlan(loaded, home, undefined, start);
+  const plan = loaded ? schedule(stops, home, start) : null;
+
+  const savePlan = (next: Stop[] | null, nextStart = start) => {
+    if (!loaded) return;
+    setPlans((prev) => {
+      const all = { ...prev };
+      if (next) all[loaded.areaId] = { stops: next.map((s) => [s.place.id, s.role]), start: nextStart };
+      else delete all[loaded.areaId];
+      writePlans(all);
+      return all;
+    });
+  };
+  const addToPlan = (p: Place) => {
+    if (p.kind === "shrine") return savePlan(insertKin(stops, { place: p, role: "kin" }, home, start));
+    // 資料館・案内所は本命の前に入れる
+    const at = Math.max(0, stops.findIndex((s) => s.role === "anchor"));
+    savePlan([...stops.slice(0, at), { place: p, role: "primer" }, ...stops.slice(at)]);
+  };
 
   if (error) {
     return (
@@ -113,7 +171,8 @@ export default function Explorer() {
             atlas={data}
             maxKm={maxKm}
             selected={selected}
-            places={selectedPlaces && !("error" in selectedPlaces) ? selectedPlaces : null}
+            places={loaded}
+            route={plan && plan.stops.length > 0 ? { home, stops: plan.stops } : null}
             focus={focus}
             onSelectArea={setSelectedId}
           />
@@ -221,8 +280,22 @@ export default function Explorer() {
                           </li>
                         ))}
                       </ul>
+                      {plan && (
+                        <ItineraryPanel
+                          plan={plan}
+                          home={home}
+                          onChange={(next) => savePlan(next)}
+                          onStart={(min) => savePlan(stops, min)}
+                          onReset={() => savePlan(null)}
+                          onFocus={setFocus}
+                        />
+                      )}
                       <AreaPlacesPanel
                         state={selectedPlaces}
+                        planIds={new Set(stops.map((s) => s.place.id))}
+                        anchorId={stops.find((s) => s.role === "anchor")?.place.id ?? null}
+                        onAdd={addToPlan}
+                        onMakeAnchor={(p) => loaded && savePlan(suggestPlan(loaded, home, p.id, start))}
                         onRetry={() => {
                           setPlaces((prev) => {
                             const next = { ...prev };
