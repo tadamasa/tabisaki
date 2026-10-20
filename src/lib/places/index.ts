@@ -2,6 +2,7 @@ import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import type { AreaPlaces } from "@/lib/types";
 import { ATLAS_TAG, getAtlas, readBoundary } from "@/lib/atlas";
+import { findEn } from "./en";
 import { type OsmElement, type Town, pairPrimer, rankPlaces } from "./rank";
 
 // OVERPASS_URL はカンマ区切りで複数指定でき、失敗したら次を試す
@@ -59,9 +60,17 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
 
   const { elements, source } = await fetchOverpass(area.bbox);
   const ranked = rankPlaces(elements, towns);
+
+  const visitedShrines = atlas.spots.filter((s) => s.cat === "shrine");
+  const townNames = new Map(atlas.municipalities.features.map((f) => [f.properties.id, f.properties.short]));
+  const townOf = (muni: string | null) => (muni ? townNames.get(muni) ?? null : null);
   return {
     areaId,
-    anchors: ranked.anchors.map((a) => ({ ...a, primer: pairPrimer(a, ranked.primers) })),
+    anchors: ranked.anchors.map((a) => ({
+      ...a,
+      primer: pairPrimer(a, ranked.primers),
+      en: findEn(a, visitedShrines, ranked.anchors, townOf),
+    })),
     primers: ranked.primers,
     shrineCount: ranked.shrineCount,
     source: `OpenStreetMap（${source}）`,

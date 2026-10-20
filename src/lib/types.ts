@@ -69,8 +69,19 @@ export type Place = {
 
 export type AreaPlaces = {
   areaId: string;
-  anchors: (Place & { primer: { place: Place; km: number } | null })[];
+  anchors: (Place & { primer: { place: Place; km: number } | null; en: En | null })[];
   primers: Place[];
   shrineCount: number;
   source: string;
+};
+
+// 本命の社と、同じ系統の社やこれまでの参拝とのつながり
+export type En = {
+  family: string;
+  honsha: string;
+  isHonsha: boolean;
+  honshaVisited: string | null;
+  visitedCount: number;
+  recent: { name: string; date: string; town: string | null }[];
+  alsoHere: string[];
 };

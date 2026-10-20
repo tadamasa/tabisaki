@@ -1,6 +1,6 @@
 "use client";
 
-import type { AreaPlaces, Place } from "@/lib/types";
+import type { AreaPlaces, En, Place } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
 
@@ -14,6 +14,29 @@ function PlaceName({ place }: { place: Place }) {
     <a href={place.wikipedia ?? mapsLink(place)} target="_blank" rel="noreferrer" className="font-medium underline-offset-2 hover:underline">
       {place.name}
     </a>
+  );
+}
+
+// 系統と、これまでの参拝とのつながりを短い文にする
+function EnNote({ en }: { en: En }) {
+  const lines: string[] = [];
+  if (en.isHonsha) lines.push(`${en.family}系の総本社・本源とされる社`);
+  else if (en.honshaVisited) lines.push(`${en.family}系。本源の${en.honshaVisited}には参拝済み`);
+  else lines.push(`${en.family}系。本源は${en.honsha}（未訪問）`);
+  if (en.visitedCount > 0) {
+    const r = en.recent[0];
+    lines.push(
+      `これまで同じ系統の社を${en.visitedCount}社訪問。最近は${r.name}${r.town ? `（${r.town}）` : ""} ${r.date}`,
+    );
+  }
+  if (en.alsoHere.length > 0) lines.push(`この地帯にも ${en.alsoHere.join("・")}`);
+  return (
+    <div className="mt-1.5 border-l-2 border-shrine/40 pl-2 text-xs text-muted">
+      <span className="font-medium text-foreground">縁</span>
+      {lines.map((l) => (
+        <p key={l}>{l}</p>
+      ))}
+    </div>
   );
 }
 
@@ -64,6 +87,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
                     ))}
                   </ul>
                 )}
+                {a.en && <EnNote en={a.en} />}
                 {a.primer && (
                   <p className="mt-1.5 text-xs text-muted">
                     先に{" "}
