@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import { type Role, type Stop, insertKin, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { type Role, type Stop, optimizeOrder, schedule, suggestPlan } from "@/lib/plan/itinerary";
 import type { AreaPlaces, Atlas, Place } from "@/lib/types";
 import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
 import ItineraryPanel from "./ItineraryPanel";
@@ -135,12 +135,9 @@ export default function Explorer() {
       return all;
     });
   };
-  const addToPlan = (p: Place) => {
-    if (p.kind === "shrine") return savePlan(insertKin(stops, { place: p, role: "kin" }, home, start));
-    // 資料館・案内所は本命の前に入れる
-    const at = Math.max(0, stops.findIndex((s) => s.role === "anchor"));
-    savePlan([...stops.slice(0, at), { place: p, role: "primer" }, ...stops.slice(at)]);
-  };
+  // 足したら、全体をいちばん早く帰れる順に組み直す。社はゆかり、資料館・案内所は予習として入れる
+  const addToPlan = (p: Place) =>
+    savePlan(optimizeOrder([...stops, { place: p, role: p.kind === "shrine" ? "kin" : "primer" }], home, start));
 
   if (error) {
     return (
@@ -287,6 +284,7 @@ export default function Explorer() {
                           onChange={(next) => savePlan(next)}
                           onStart={(min) => savePlan(stops, min)}
                           onReset={() => savePlan(null)}
+                          onOptimize={() => savePlan(optimizeOrder(stops, home, start))}
                           onFocus={setFocus}
                         />
                       )}
@@ -295,7 +293,7 @@ export default function Explorer() {
                         planIds={new Set(stops.map((s) => s.place.id))}
                         anchorId={stops.find((s) => s.role === "anchor")?.place.id ?? null}
                         onAdd={addToPlan}
-                        onMakeAnchor={(p) => loaded && savePlan(suggestPlan(loaded, home, p.id, start))}
+                        onMakeAnchor={(p) => loaded && savePlan(optimizeOrder(suggestPlan(loaded, home, p.id, start), home, start))}
                         onRetry={() => {
                           setPlaces((prev) => {
                             const next = { ...prev };

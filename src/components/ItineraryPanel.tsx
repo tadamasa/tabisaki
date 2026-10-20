@@ -17,6 +17,7 @@ type Props = {
   onChange: (stops: Stop[]) => void;
   onStart: (min: number) => void;
   onReset: () => void;
+  onOptimize: () => void;
   onFocus: (p: Place) => void;
 };
 
@@ -24,7 +25,7 @@ function Drive({ min }: { min: number }) {
   return <li className="py-0.5 pl-6 text-[11px] text-muted">車で約 {min} 分</li>;
 }
 
-export default function ItineraryPanel({ plan, home, onChange, onStart, onReset, onFocus }: Props) {
+export default function ItineraryPanel({ plan, home, onChange, onStart, onReset, onOptimize, onFocus }: Props) {
   const stops: Stop[] = plan.stops.map(({ place, role }) => ({ place, role }));
   const move = (i: number, d: -1 | 1) => {
     const next = [...stops];
@@ -37,9 +38,16 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
     <section className="mt-4 rounded-lg border border-shrine/30 bg-shrine/5 p-3">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold">日帰りの行程（目安）</h3>
-        <button type="button" onClick={onReset} className="text-xs text-museum underline">
-          組み直す
-        </button>
+        <span className="flex gap-3 text-xs">
+          {stops.length > 1 && (
+            <button type="button" onClick={onOptimize} className="text-museum underline">
+              近い順に並べ直す
+            </button>
+          )}
+          <button type="button" onClick={onReset} className="text-museum underline">
+            おすすめに戻す
+          </button>
+        </span>
       </div>
 
       {stops.length === 0 ? (

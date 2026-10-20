@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AreaPlaces, Place } from "@/lib/types";
-import { DAY_END, driveMinutes, googleMapsRoute, insertKin, schedule, suggestPlan } from "./itinerary";
+import { DAY_END, driveMinutes, googleMapsRoute, insertKin, optimizeOrder, schedule, suggestPlan } from "./itinerary";
 
 const home: [number, number] = [135.5157, 34.7617];
 const place = (id: string, kind: Place["kind"], lng: number, lat: number, score = 0): Place => ({
@@ -54,4 +54,24 @@ test("Google マップの経路は自宅発着で立ち寄りを順に並べる"
   const url = new URL(googleMapsRoute([{ place: museum, role: "primer" }, { place: main, role: "anchor" }], home));
   assert.equal(url.searchParams.get("origin"), "34.76170,135.51570");
   assert.equal(url.searchParams.get("waypoints"), "34.39000,135.86000|34.37000,135.87000");
+});
+
+test("並べ直しは予習→本命→ゆかりを保ち、ゆかりを遠回りしない順にする", () => {
+  // 自宅は北西。本命から南東へ一直線に並んだ社を、わざと逆順で渡す
+  const line = [1, 2, 3, 4].map((k) => place(`社${k}`, "shrine", 135.87 + 0.03 * k, 34.37 - 0.03 * k));
+  const messy = [
+    { place: line[2], role: "kin" as const },
+    { place: main, role: "anchor" as const },
+    { place: line[0], role: "kin" as const },
+    { place: museum, role: "primer" as const },
+    { place: line[3], role: "kin" as const },
+    { place: line[1], role: "kin" as const },
+  ];
+  const ordered = optimizeOrder(messy, home);
+  assert.deepEqual(ordered.slice(0, 2).map((s) => s.role), ["primer", "anchor"]);
+  assert.ok(ordered.slice(2).every((s) => s.role === "kin"));
+  assert.ok(schedule(ordered, home).home <= schedule(messy, home).home);
+  const kinIds = ordered.slice(2).map((s) => s.place.id);
+  // 一直線なので、行きか帰りのどちらかで端から順に回るはず
+  assert.ok(["社1,社2,社3,社4", "社4,社3,社2,社1"].includes(kinIds.join(",")), kinIds.join(","));
 });

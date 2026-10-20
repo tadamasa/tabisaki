@@ -98,6 +98,54 @@ export function insertKin(stops: Stop[], kin: Stop, home: [number, number], star
   return best ?? [...stops, kin];
 }
 
+// 予習 → 本命 → ゆかり の並びは崩さずに、それぞれの中の順番を帰りがいちばん早くなるように決め直す
+const EXACT_MAX = 7;
+
+function permutations<T>(xs: T[]): T[][] {
+  if (xs.length <= 1) return [xs];
+  return xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((rest) => [x, ...rest]));
+}
+
+// 数が多いときは、近い順に並べてから2地点の入れ替えで縮める
+function improve(order: Stop[], cost: (o: Stop[]) => number): Stop[] {
+  let best = order;
+  let bestCost = cost(best);
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (let i = 0; i < best.length - 1; i++) {
+      for (let j = i + 1; j < best.length; j++) {
+        const next = [...best.slice(0, i), ...best.slice(i, j + 1).reverse(), ...best.slice(j + 1)];
+        const c = cost(next);
+        if (c < bestCost) [best, bestCost, changed] = [next, c, true];
+      }
+    }
+  }
+  return best;
+}
+
+function bestOrder(group: Stop[], cost: (o: Stop[]) => number): Stop[] {
+  if (group.length <= 1) return group;
+  if (group.length > EXACT_MAX) return improve(group, cost);
+  let best = group;
+  let bestCost = Infinity;
+  for (const o of permutations(group)) {
+    const c = cost(o);
+    if (c < bestCost) [best, bestCost] = [o, c];
+  }
+  return best;
+}
+
+export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60): Stop[] {
+  const anchor = stops.filter((s) => s.role === "anchor");
+  const primers = stops.filter((s) => s.role === "primer");
+  const kin = stops.filter((s) => s.role === "kin");
+  const homeAt = (o: Stop[]) => schedule(o, home, start).home;
+  if (anchor.length === 0) return bestOrder(stops, homeAt);
+  const orderedKin = bestOrder(kin, (k) => homeAt([...primers, ...anchor, ...k]));
+  const orderedPrimers = bestOrder(primers, (p) => homeAt([...p, ...anchor, ...orderedKin]));
+  return [...orderedPrimers, ...anchor, ...orderedKin];
+}
+
 export const clock = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
 
 // Google マップの経路（自宅発・自宅着、立ち寄りは9か所まで）

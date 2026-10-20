@@ -40,3 +40,28 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* 地図の吹き出し。暗い画面設定でも白地に濃い文字で読めるようにし、閉じるボタンを大きくする */
+.maplibregl-popup-content {
+  color: #23211c;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 10px 34px 10px 12px;
+  border-radius: 8px;
+}
+.maplibregl-popup-content a {
+  color: #3b6fb6;
+  text-decoration: underline;
+}
+.maplibregl-popup-close-button {
+  width: 30px;
+  height: 30px;
+  font-size: 22px;
+  line-height: 1;
+  color: #6b665c;
+  border-radius: 0 8px 0 8px;
+}
+.maplibregl-popup-close-button:hover {
+  background: #efece4;
+  color: #23211c;
+}
