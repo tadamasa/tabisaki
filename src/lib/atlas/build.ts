@@ -3,9 +3,14 @@ import * as turf from "@turf/turf";
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import type { Atlas, BlankArea, MuniProps, Spot, Summary } from "@/lib/types";
 
-// 空白地帯: 中心の町から半径 AREA_RADIUS_KM 以内でつながっている未訪問の町の集まり
-const AREA_RADIUS_KM = 20;
-const AREA_MIN_TOWNS = 3;
+// 空白地帯: 中心の町から、隣の町へ渡り歩いて移動の手間が AREA_BUDGET_MIN 分以内に収まる未訪問の町の集まり。
+// 町どうしの手間は scripts/terrain_edges.py が標高から見積もったもの（峠や尾根を越えるほど大きい）
+// 平野では手間の小さい町が続くので、日帰りで回れる町数 AREA_MAX_TOWNS で打ち切る
+const AREA_BUDGET_MIN = 30;
+const AREA_MAX_TOWNS = 8;
+
+// [町コード, 町コード, 分] 隣り合う町の組だけを持つ
+export type TerrainEdge = [string, string, number];
 
 export type VisitRow = {
   ts: string;
@@ -61,12 +66,14 @@ export function buildAtlas(
   detailed: Boundary,
   display: Boundary,
   home: [number, number],
+  edges: TerrainEdge[],
 ): Atlas {
   const homePt = turf.point(home);
 
   const units = new Map<string, Unit>();
   for (const f of detailed.features) {
-    if (!f.geometry) continue;
+    // 所属未定地などコードのない区域は町として扱わない
+    if (!f.geometry || !f.properties.N03_007) continue;
     const u = unitOf(f.properties);
     if (!u.short) continue;
     const entry = units.get(u.id) ?? ({ ...u, short: u.short, polys: [] } as unknown as Unit);
@@ -107,7 +114,7 @@ export function buildAtlas(
     spots.push({ name: v.name, lat: v.lat, lng: v.lng, ts: v.ts, cat: categoryOf(v.name), muni: u?.id ?? null, note: v.note });
   }
 
-  const areas = groupBlankAreas(unitList.filter((u) => u.visits === 0));
+  const areas = groupBlankAreas(unitList.filter((u) => u.visits === 0), edges);
   const areaOf = new Map(areas.flatMap((a) => a.towns.map((t) => [t.id, a.id] as const)));
 
   const municipalities: FeatureCollection<Polygon | MultiPolygon, MuniProps> = {
@@ -160,57 +167,60 @@ export function buildAtlas(
   return { summary, areas, spots, municipalities };
 }
 
-// 近くの未訪問の町が多い町から順に中心を選び、重ならないようにまとめる
-function groupBlankAreas(unvisited: Unit[]): BlankArea[] {
-  const touches = (a: Unit, b: Unit) => {
-    const [ax0, ay0, ax1, ay1] = a.bbox;
-    const [bx0, by0, bx1, by1] = b.bbox;
-    if (ax1 < bx0 || bx1 < ax0 || ay1 < by0 || by1 < ay0) return false;
-    return a.polys.some((p) => b.polys.some((q) => turf.booleanIntersects(p, q)));
-  };
-  const neighbors = new Map<string, Unit[]>(unvisited.map((u) => [u.id, []]));
-  for (let i = 0; i < unvisited.length; i++) {
-    for (let j = i + 1; j < unvisited.length; j++) {
-      const a = unvisited[i];
-      const b = unvisited[j];
-      if (turf.distance(a.center, b.center) > 2 * AREA_RADIUS_KM) continue;
-      if (touches(a, b)) {
-        neighbors.get(a.id)!.push(b);
-        neighbors.get(b.id)!.push(a);
-      }
-    }
+// 手間の範囲に入る未訪問の町が多い町から順に中心を選び、重ならないようにまとめる
+function groupBlankAreas(unvisited: Unit[], edges: TerrainEdge[]): BlankArea[] {
+  const byId = new Map(unvisited.map((u) => [u.id, u]));
+  const neighbors = new Map<string, { unit: Unit; min: number }[]>(unvisited.map((u) => [u.id, []]));
+  for (const [a, b, min] of edges) {
+    const ua = byId.get(a);
+    const ub = byId.get(b);
+    if (!ua || !ub) continue;
+    neighbors.get(a)!.push({ unit: ub, min });
+    neighbors.get(b)!.push({ unit: ua, min });
   }
+
   const used = new Set<string>();
+  // 中心から手間の少ない順に町を広げる（ダイクストラ法）
   const grow = (seed: Unit) => {
-    const members = [seed];
-    const seen = new Set([seed.id]);
-    for (let k = 0; k < members.length; k++) {
-      for (const n of neighbors.get(members[k].id)!) {
-        if (seen.has(n.id) || used.has(n.id)) continue;
-        if (turf.distance(seed.center, n.center) > AREA_RADIUS_KM) continue;
-        seen.add(n.id);
-        members.push(n);
+    const cost = new Map([[seed.id, 0]]);
+    const done = new Set<string>();
+    const members: Unit[] = [];
+    for (;;) {
+      let next: Unit | null = null;
+      for (const [id, c] of cost) if (!done.has(id) && (!next || c < cost.get(next.id)!)) next = byId.get(id)!;
+      if (!next || members.length >= AREA_MAX_TOWNS) break;
+      done.add(next.id);
+      members.push(next);
+      for (const { unit, min } of neighbors.get(next.id)!) {
+        if (used.has(unit.id) || done.has(unit.id)) continue;
+        const c = cost.get(next.id)! + min;
+        if (c <= AREA_BUDGET_MIN && c < (cost.get(unit.id) ?? Infinity)) cost.set(unit.id, c);
       }
     }
-    return members;
+    // spread: 中心から各町への手間の合計。同じ町数なら、まとまりのよい地帯を先に採る
+    const spread = members.reduce((sum, m) => sum + cost.get(m.id)!, 0);
+    return { members, spread };
   };
 
   const areas: BlankArea[] = [];
   for (;;) {
-    let best: Unit[] | null = null;
+    let bestGrow: ReturnType<typeof grow> | null = null;
     for (const u of unvisited) {
       if (used.has(u.id)) continue;
-      const members = grow(u);
-      if (!best || members.length > best.length || (members.length === best.length && u.km < best[0].km)) {
-        best = members;
+      const g = grow(u);
+      const b = bestGrow;
+      if (!b || g.members.length > b.members.length || (g.members.length === b.members.length && g.spread < b.spread)) {
+        bestGrow = g;
       }
     }
-    if (!best || best.length < AREA_MIN_TOWNS) break;
+    const best = bestGrow?.members;
+    // 山あいでは一町だけで地帯になることもある（その町を旅の中心にする）
+    if (!best) break;
     best.forEach((m) => used.add(m.id));
     const seed = best[0];
     areas.push({
       id: `area-${seed.id}`,
-      label: `${seed.short}周辺`,
+      label: best.length > 1 ? `${seed.short}周辺` : seed.short,
       pref: [...new Set(best.map((m) => m.pref))],
       km: Math.min(...best.map((m) => m.km)),
       center: seed.center,

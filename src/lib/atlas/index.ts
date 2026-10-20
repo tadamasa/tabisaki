@@ -31,10 +31,11 @@ export async function getAtlas(): Promise<Atlas> {
   cacheTag(ATLAS_TAG);
 
   const [lat, lng] = (process.env.HOME_LATLNG ?? DEFAULT_HOME).split(",").map(Number);
-  const [visits, detailed, display] = await Promise.all([
+  const [visits, detailed, display, terrain] = await Promise.all([
     getVisits(),
     readBoundary("detailed"),
     readBoundary("display"),
+    readBoundary("edges"),
   ]);
-  return buildAtlas(visits, detailed, display, [lng, lat]);
+  return buildAtlas(visits, detailed, display, [lng, lat], terrain.edges);
 }
