@@ -34,8 +34,14 @@ const CATEGORY_LABEL: Record<Spot["cat"], string> = {
   other: "その他",
 };
 
-const PLACE_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", art: "美術館", info: "観光案内所" };
-const PLACE_BG: Record<Place["kind"], string> = { shrine: "bg-shrine", museum: "bg-museum", art: "bg-art", info: "bg-museum" };
+const PLACE_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", art: "美術館", castle: "城・城跡", info: "観光案内所" };
+const PLACE_BG: Record<Place["kind"], string> = {
+  shrine: "bg-shrine",
+  museum: "bg-museum",
+  art: "bg-art",
+  castle: "bg-castle",
+  info: "bg-museum",
+};
 
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -371,7 +377,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
     placeMarkersRef.current = new Map();
     actionBoxesRef.current = new Map();
     if (!places) return;
-    for (const p of [...places.primers, ...(places.halls ?? []), ...places.anchors]) {
+    for (const p of [...places.primers, ...(places.halls ?? []), ...(places.castles ?? []), ...places.anchors]) {
       if (placeMarkersRef.current.has(p.id)) continue;
       const el = document.createElement("div");
       el.className = `size-3.5 cursor-pointer rounded-full ring-2 ring-white shadow ${PLACE_BG[p.kind]}`;

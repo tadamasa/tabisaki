@@ -4,7 +4,8 @@ import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
 
-const KIND_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", art: "美術館", info: "観光案内所" };
+const KIND_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", art: "美術館", castle: "城・城跡", info: "観光案内所" };
+const DOT: Record<Place["kind"], string> = { shrine: "bg-shrine", museum: "bg-museum", art: "bg-art", castle: "bg-castle", info: "bg-museum" };
 
 const mapsLink = (p: Place) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.town}`)}`;
@@ -87,7 +88,7 @@ function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFoc
   return (
     <li className="flex items-start justify-between gap-2 py-1.5">
       <span className="min-w-0">
-        <span className={`mr-1.5 inline-block size-2 rounded-full ${place.kind === "art" ? "bg-art" : "bg-museum"}`} />
+        <span className={`mr-1.5 inline-block size-2 rounded-full ${DOT[place.kind]}`} />
         <PlaceName place={place} />
         <span className="ml-1.5 text-xs text-muted">
           {KIND_LABEL[place.kind]} ・ {place.town}
@@ -117,7 +118,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
     );
   }
 
-  const { anchors, primers, halls = [], shrineCount, source } = state;
+  const { anchors, primers, halls = [], castles = [], shrineCount, source } = state;
   const infos = primers.filter((p) => p.kind === "info");
   return (
     <div className="mt-4 space-y-4">
@@ -181,6 +182,17 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
           </ul>
         )}
       </section>
+
+      {castles.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">城・城跡</h3>
+          <ul className="mt-1 divide-y divide-border text-sm">
+            {castles.map((p) => (
+              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+            ))}
+          </ul>
+        </section>
+      )}
 
       {infos.length > 0 && (
         <section>

@@ -22,6 +22,7 @@ const areaPlaces: AreaPlaces = {
   ],
   primers: [museum],
   halls: [museum],
+  castles: [],
   shrineCount: 4,
   source: "test",
 };
@@ -96,4 +97,23 @@ test("並べ直しは予習を本命より前に保ち、遠回りしない順�
   assert.ok(["社1,社2,社3,社4", "社4,社3,社2,社1"].includes(kinIds), kinIds);
   // もう最短なら、並べ直しても変わらない
   assert.deepEqual(optimizeOrder(ordered, home), ordered);
+});
+
+test("固定した地点は、並べ直してもその番目から動かない", () => {
+  const line = [1, 2, 3].map((k) => place(`社${k}`, "shrine", 135.87 + 0.03 * k, 34.37 - 0.03 * k));
+  const stops = [
+    { place: museum, role: "primer" as const },
+    { place: main, role: "anchor" as const },
+    { place: line[2], role: "kin" as const, fixed: true },
+    { place: line[0], role: "kin" as const },
+    { place: line[1], role: "kin" as const },
+  ];
+  const ordered = optimizeOrder(stops, home);
+  assert.equal(ordered[2].place.id, "社3");
+  assert.ok(ordered[2].fixed);
+  // 固定がなければ社3は3番目には来ない
+  assert.notEqual(optimizeOrder(stops.map((s) => ({ ...s, fixed: false })), home)[2].place.id, "社3");
+  // 足したときも固定は残る
+  const added = optimizeOrder([...ordered, { place: kinNear, role: "kin" }], home);
+  assert.equal(added[2].place.id, "社3");
 });

@@ -3,11 +3,12 @@
 import type { AreaPlaces, Place } from "@/lib/types";
 
 export type Role = "primer" | "anchor" | "kin" | "extra";
-export type Stop = { place: Place; role: Role };
+// fixed: 並べ直しても、行程の中のこの位置（何番目か）から動かさない
+export type Stop = { place: Place; role: Role; fixed?: boolean };
 export type TimedStop = Stop & { driveMin: number; arrive: number; depart: number; stayMin: number };
 export type Plan = { start: number; stops: TimedStop[]; returnMin: number; home: number; overMin: number };
 
-// 滞在の目安（分）。博物館・美術館が本命のときは長めに見る
+// 滞在の目安（分）。博物館・美術館・城が本命のときは長めに見る
 export const STAY_MIN: Record<Role, number> = { primer: 60, anchor: 60, kin: 30, extra: 45 };
 const HALL_ANCHOR_MIN = 90;
 export const stayOf = (s: Stop) => (s.role === "anchor" && s.place.kind !== "shrine" ? HALL_ANCHOR_MIN : STAY_MIN[s.role]);
@@ -68,10 +69,10 @@ function kinCandidates(places: AreaPlaces, anchor: Place) {
 }
 
 // 本命を決めて、予習先と、日が暮れるまでに回れるゆかりの社を足した行程を作る。
-// 本命は社のほか、博物館・美術館も選べる（そのときは予習先を付けない）
+// 本命は社のほか、博物館・美術館・城も選べる（社以外のときは予習先を付けない）
 export function suggestPlan(places: AreaPlaces, home: [number, number], anchorId?: string, start = 8 * 60): Stop[] {
   const anchor =
-    places.anchors.find((a) => a.id === anchorId) ?? (places.halls ?? []).find((h) => h.id === anchorId) ?? places.anchors[0];
+    places.anchors.find((a) => a.id === anchorId) ?? [...(places.halls ?? []), ...(places.castles ?? [])].find((h) => h.id === anchorId) ?? places.anchors[0];
   if (!anchor) return [];
   const stops: Stop[] = [];
   const primer =
@@ -111,8 +112,9 @@ export function insertKin(stops: Stop[], kin: Stop, home: [number, number], star
   return best ?? [...stops, kin];
 }
 
-// 予習先が本命より前にあることだけを守って、帰りがいちばん早くなる順に並べ直す。
-// 8か所までは全部の順番を試し、それより多いときは区間を裏返す改善（2-opt）で縮める
+// 予習先が本命より前にあることと、固定した地点の位置を守って、帰りがいちばん早くなる順に並べ直す。
+// 動かせる地点が8か所までなら全部の順番を試し、それより多いときは区間を裏返す改善（2-opt）で縮める。
+// 固定のせいで「予習が本命より前」を守れないときは、今の順のままにする
 const EXACT_MAX = 8;
 
 const primerFirst = (o: Stop[]) => {
@@ -132,18 +134,32 @@ function* permutations<T>(xs: T[]): Generator<T[]> {
 
 export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60): Stop[] {
   if (stops.length <= 1) return stops;
-  const cost = (o: Stop[]) => (primerFirst(o) ? schedule(o, home, start).home : Infinity);
+  // 固定した地点はその番目に置いたまま、残りの地点だけで空いた番目を埋める
+  const slots = stops.flatMap((s, i) => (s.fixed ? [] : [i]));
+  const free = stops.filter((s) => !s.fixed);
+  if (free.length <= 1) return stops;
+  const fill = (order: Stop[]) => {
+    const out = [...stops];
+    slots.forEach((slot, k) => (out[slot] = order[k]));
+    return out;
+  };
+  const cost = (order: Stop[]) => {
+    const o = fill(order);
+    return primerFirst(o) ? schedule(o, home, start).home : Infinity;
+  };
   // 今の順で同点なら動かさない
-  let best = primerFirst(stops)
-    ? stops
-    : [...stops.filter((s) => s.role === "primer"), ...stops.filter((s) => s.role !== "primer")];
+  let best = free;
   let bestCost = cost(best);
-  if (stops.length <= EXACT_MAX) {
-    for (const o of permutations(stops)) {
+  if (free.length <= EXACT_MAX) {
+    for (const o of permutations(free)) {
       const c = cost(o);
       if (c < bestCost) [best, bestCost] = [o, c];
     }
-    return best;
+    return fill(best);
+  }
+  if (bestCost === Infinity) {
+    const primersFirst = [...free.filter((s) => s.role === "primer"), ...free.filter((s) => s.role !== "primer")];
+    if (cost(primersFirst) < Infinity) [best, bestCost] = [primersFirst, cost(primersFirst)];
   }
   for (let changed = true; changed; ) {
     changed = false;
@@ -155,7 +171,7 @@ export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 *
       }
     }
   }
-  return best;
+  return fill(best);
 }
 
 export const clock = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;

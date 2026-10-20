@@ -23,7 +23,8 @@ const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query
 const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
 
 // 編集した行程は、この端末のブラウザに地帯ごとに覚えておく
-type SavedPlan = { stops: [string, Role][]; start: number };
+// 3つ目が 1 の地点は、並べ直しても位置を動かさない
+type SavedPlan = { stops: [string, Role, 1?][]; start: number };
 const PLANS_KEY = "tabisaki:plans";
 const DEFAULT_START = 8 * 60;
 
@@ -44,7 +45,7 @@ function writePlans(plans: Record<string, SavedPlan>) {
 }
 
 const AREA_PLACE = (ap: AreaPlaces) =>
-  new Map<string, Place>([...ap.anchors, ...ap.primers, ...(ap.halls ?? [])].map((p) => [p.id, p]));
+  new Map<string, Place>([...ap.anchors, ...ap.primers, ...(ap.halls ?? []), ...(ap.castles ?? [])].map((p) => [p.id, p]));
 
 async function fetchPlaces(areaId: string): Promise<NonNullable<PlacesState>> {
   try {
@@ -128,9 +129,9 @@ export default function Explorer() {
   const stops: Stop[] = !loaded
     ? []
     : saved
-      ? saved.stops.flatMap(([id, role]) => {
+      ? saved.stops.flatMap(([id, role, fixed]) => {
           const place = AREA_PLACE(loaded).get(id);
-          return place ? [{ place, role }] : [];
+          return place ? [{ place, role, fixed: fixed === 1 }] : [];
         })
       : suggestPlan(loaded, home, undefined, start);
   const plan = loaded ? schedule(stops, home, start) : null;
@@ -139,7 +140,7 @@ export default function Explorer() {
     if (!loaded) return;
     setPlans((prev) => {
       const all = { ...prev };
-      if (next) all[loaded.areaId] = { stops: next.map((s) => [s.place.id, s.role]), start: nextStart };
+      if (next) all[loaded.areaId] = { stops: next.map((s) => (s.fixed ? [s.place.id, s.role, 1] : [s.place.id, s.role])), start: nextStart };
       else delete all[loaded.areaId];
       writePlans(all);
       return all;
@@ -363,6 +364,10 @@ export default function Explorer() {
                 <li className="flex items-center gap-1.5">
                   <span className="inline-block size-2.5 rounded-full bg-art" />
                   美術館
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="inline-block size-2.5 rounded-full bg-castle" />
+                  城・城跡
                 </li>
               </ul>
             </header>

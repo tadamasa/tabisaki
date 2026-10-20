@@ -59,3 +59,20 @@ test("博物館・美術館は目的地の候補として、公立の館を上�
   assert.deepEqual(r.halls[0].reasons, ["公立"]);
   assert.ok(!r.primers.some((p) => p.kind === "art"));
 });
+
+test("城・城跡を目的地の候補として、記事や史跡指定のある城を上に出す", () => {
+  const r = rankPlaces(
+    [
+      ...elements,
+      node(12, 135.87, 34.37, { historic: "castle", ruins: "yes", name: "吉野城跡" }),
+      node(13, 135.57, 34.37, { historic: "castle", name: "かつらぎ城", wikipedia: "ja:かつらぎ城", heritage: "2" }),
+    ],
+    towns,
+  );
+  assert.deepEqual(r.castles.map((c) => [c.name, c.kind]), [
+    ["かつらぎ城", "castle"],
+    ["吉野城跡", "castle"],
+  ]);
+  assert.deepEqual(r.castles[1].reasons, ["城跡"]);
+  assert.ok(!r.anchors.some((a) => a.kind === "castle"));
+});

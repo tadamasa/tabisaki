@@ -41,6 +41,7 @@ function kindOf(tags: Record<string, string>): Place["kind"] | null {
   if (tags.amenity === "place_of_worship" && tags.religion === "shinto") return "shrine";
   if (tags.tourism === "gallery" || (tags.tourism === "museum" && (tags.museum === "art" || /美術館/.test(tags.name ?? "")))) return "art";
   if (tags.tourism === "museum") return "museum";
+  if (tags.historic === "castle") return "castle";
   if (tags.tourism === "information" && (tags.information === "office" || tags.information === "visitor_centre")) return "info";
   return null;
 }
@@ -86,6 +87,10 @@ export function rankPlaces(elements: OsmElement[], towns: Town[]) {
         }
       }
       if (/博物館|美術館|ミュージアム/.test(name)) score += 1;
+    } else if (kind === "castle") {
+      // 天守や石垣が残る城は史跡指定や記事があることが多い
+      if (tags.ruins !== "yes" && tags.castle_type !== "earthwork") score += 1;
+      if (/城跡|城址/.test(name) || tags.ruins === "yes") reasons.push("城跡");
     }
     if (tags.wikipedia) {
       score += 3;
@@ -117,11 +122,13 @@ export function rankPlaces(elements: OsmElement[], towns: Town[]) {
   // 予習先は資料館・博物館と案内所。美術館は目的地として別に出す
   const primers = places.filter((p) => p.kind === "museum" || p.kind === "info").sort(byScore);
   const halls = places.filter((p) => p.kind === "museum" || p.kind === "art").sort(byScore);
+  const castles = places.filter((p) => p.kind === "castle").sort(byScore);
   return {
     // 由緒の手がかりがある社を優先し、なければ名前のある社を少しだけ出す
     anchors: shrines.filter((s) => s.score > 0).slice(0, 12).concat(shrines.filter((s) => s.score === 0).slice(0, 3)),
     primers: primers.slice(0, 20),
     halls: halls.slice(0, 12),
+    castles: castles.slice(0, 10),
     shrineCount: shrines.length,
   };
 }
