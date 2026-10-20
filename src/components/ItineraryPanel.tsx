@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MAPS_WAYPOINT_MAX, type Plan, type Role, type Stop, clock, googleMapsRoute } from "@/lib/plan/itinerary";
+import { MAPS_WAYPOINT_MAX, type Plan, blocksOf, type Role, type Stop, clock, googleMapsRoute } from "@/lib/plan/itinerary";
 import type { Place } from "@/lib/types";
 
 const ROLE_LABEL: Record<Role, string> = { primer: "予習", anchor: "本命", kin: "ゆかり", extra: "立ち寄り" };
@@ -24,19 +24,43 @@ type Props = {
   onFocus: (p: Place) => void;
 };
 
-function Drive({ min }: { min: number }) {
-  return <li className="py-0.5 pl-6 text-[11px] text-muted">車で約 {min} 分</li>;
+// 地点のあいだの移動。地点どうしのあいだでは、2か所をつなぐボタンも出す
+function Drive({ min, link }: { min: number; link?: { on: boolean; toggle: () => void } }) {
+  return (
+    <li className="flex items-center gap-2 py-0.5 pl-6 text-[11px] text-muted">
+      <span className={link?.on ? "border-l-2 border-area pl-2" : ""}>車で約 {min} 分</span>
+      {link && (
+        <button
+          type="button"
+          onClick={link.toggle}
+          aria-pressed={link.on}
+          className={`min-h-7 rounded-full border px-2 ${link.on ? "border-area bg-area/15 text-area" : "border-border"}`}
+        >
+          {link.on ? "🔗 続けて回る（外す）" : "🔗 つなぐ"}
+        </button>
+      )}
+    </li>
+  );
 }
 
 export default function ItineraryPanel({ plan, home, onChange, onStart, onReset, onOptimize, onFocus }: Props) {
-  const stops: Stop[] = plan.stops.map(({ place, role, fixed }) => ({ place, role, fixed }));
-  const move = (i: number, d: -1 | 1) => {
-    const next = [...stops];
-    [next[i], next[i + d]] = [next[i + d], next[i]];
-    onChange(next);
+  const stops: Stop[] = plan.stops.map(({ place, role, linkNext }) => ({ place, role, linkNext }));
+  // つないだ地点はかたまりごと動かす
+  const blocks = blocksOf(stops);
+  const blockAt = (i: number) => {
+    let n = 0;
+    return blocks.findIndex((b) => (n += b.length) > i);
   };
-  const remove = (i: number) => onChange(stops.filter((_, k) => k !== i));
-  const toggleFixed = (i: number) => onChange(stops.map((s, k) => (k === i ? { ...s, fixed: !s.fixed } : s)));
+  const move = (i: number, d: -1 | 1) => {
+    const b = blockAt(i);
+    const next = [...blocks];
+    [next[b], next[b + d]] = [next[b + d], next[b]];
+    onChange(next.flat());
+  };
+  // 外した地点の前の地点は、どこにもつながないようにする
+  const remove = (i: number) =>
+    onChange(stops.flatMap((s, k) => (k === i ? [] : k === i - 1 ? [{ ...s, linkNext: false }] : [s])));
+  const toggleLink = (i: number) => onChange(stops.map((s, k) => (k === i ? { ...s, linkNext: !s.linkNext } : s)));
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     if (!notice) return;
@@ -91,8 +115,8 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
           {plan.stops.map((s, i) => (
             <li key={s.place.id}>
               <ol>
-                <Drive min={s.driveMin} />
-                <li className={`flex items-start gap-2 rounded bg-surface px-2 py-1.5 ring-1 ${s.fixed ? "ring-area" : "ring-border"}`}>
+                <Drive min={s.driveMin} link={i > 0 ? { on: !!stops[i - 1].linkNext, toggle: () => toggleLink(i - 1) } : undefined} />
+                <li className="flex items-start gap-2 rounded bg-surface px-2 py-1.5 ring-1 ring-border">
                   <span className="w-[5.5rem] shrink-0 tabular-nums text-xs text-muted">
                     {clock(s.arrive)}–{clock(s.depart)}
                   </span>
@@ -104,20 +128,10 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
                     <span className="ml-1 text-xs text-muted">{s.place.town}</span>
                   </span>
                   <span className="flex shrink-0 gap-0.5 text-muted">
-                    <button
-                      type="button"
-                      aria-label={s.fixed ? "固定を外す" : "この順番に固定"}
-                      aria-pressed={!!s.fixed}
-                      title={s.fixed ? "固定を外す" : "この順番に固定（並べ直しても動かさない）"}
-                      onClick={() => toggleFixed(i)}
-                      className={`size-8 rounded hover:bg-background ${s.fixed ? "bg-area/20 text-area" : "opacity-40"}`}
-                    >
-                      📌
-                    </button>
-                    <button type="button" aria-label="前へ" disabled={i === 0} onClick={() => move(i, -1)} className="size-8 rounded hover:bg-background disabled:opacity-30">
+                    <button type="button" aria-label="前へ" disabled={blockAt(i) === 0} onClick={() => move(i, -1)} className="size-8 rounded hover:bg-background disabled:opacity-30">
                       ↑
                     </button>
-                    <button type="button" aria-label="後ろへ" disabled={i === stops.length - 1} onClick={() => move(i, 1)} className="size-8 rounded hover:bg-background disabled:opacity-30">
+                    <button type="button" aria-label="後ろへ" disabled={blockAt(i) === blocks.length - 1} onClick={() => move(i, 1)} className="size-8 rounded hover:bg-background disabled:opacity-30">
                       ↓
                     </button>
                     <button type="button" aria-label="外す" onClick={() => remove(i)} className="size-8 rounded hover:bg-background">
@@ -144,7 +158,7 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
           {stops.length > MAPS_WAYPOINT_MAX && (
             <span className="text-shrine">Googleマップには最初の{MAPS_WAYPOINT_MAX}か所までしか渡せません。</span>
           )}
-          <span className="text-muted">時刻は直線距離からの目安です。📌で順番を固定すると、並べ直しや追加のときもその番目に残ります。</span>
+          <span className="text-muted">時刻は直線距離からの目安です。地点のあいだの「🔗 つなぐ」を押すと、その2か所は並べ直しても続けてこの順に回ります。</span>
         </p>
       )}
     </section>

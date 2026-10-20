@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AreaPlaces, Place } from "@/lib/types";
-import { DAY_END, driveMinutes, googleMapsRoute, insertKin, optimizeOrder, roleFor, schedule, suggestPlan } from "./itinerary";
+import { DAY_END, blocksOf, driveMinutes, googleMapsRoute, insertKin, optimizeOrder, roleFor, schedule, suggestPlan } from "./itinerary";
 
 const home: [number, number] = [135.5157, 34.7617];
 const place = (id: string, kind: Place["kind"], lng: number, lat: number, score = 0): Place => ({
@@ -99,21 +99,34 @@ test("並べ直しは予習を本命より前に保ち、遠回りしない順�
   assert.deepEqual(optimizeOrder(ordered, home), ordered);
 });
 
-test("固定した地点は、並べ直してもその番目から動かない", () => {
+test("つないだ2か所は、並べ直しても続けてこの順に回る", () => {
   const line = [1, 2, 3].map((k) => place(`社${k}`, "shrine", 135.87 + 0.03 * k, 34.37 - 0.03 * k));
   const stops = [
     { place: museum, role: "primer" as const },
     { place: main, role: "anchor" as const },
-    { place: line[2], role: "kin" as const, fixed: true },
+    // 遠い社3のすぐあとに社1へ戻る、とつなぐ
+    { place: line[2], role: "kin" as const, linkNext: true },
     { place: line[0], role: "kin" as const },
     { place: line[1], role: "kin" as const },
   ];
+  const ids = (o: { place: Place }[]) => o.map((s) => s.place.id);
   const ordered = optimizeOrder(stops, home);
-  assert.equal(ordered[2].place.id, "社3");
-  assert.ok(ordered[2].fixed);
-  // 固定がなければ社3は3番目には来ない
-  assert.notEqual(optimizeOrder(stops.map((s) => ({ ...s, fixed: false })), home)[2].place.id, "社3");
-  // 足したときも固定は残る
-  const added = optimizeOrder([...ordered, { place: kinNear, role: "kin" }], home);
-  assert.equal(added[2].place.id, "社3");
+  const at3 = ids(ordered).indexOf("社3");
+  assert.equal(ids(ordered)[at3 + 1], "社1");
+  assert.ok(ordered[at3].linkNext);
+  // つながなければ社3のすぐあとに社1は来ない
+  const free = ids(optimizeOrder(stops.map((s) => ({ ...s, linkNext: false })), home));
+  assert.notEqual(free[free.indexOf("社3") + 1], "社1");
+  // 足したときもつながりは残る
+  const added = ids(optimizeOrder([...ordered, { place: kinNear, role: "kin" }], home));
+  assert.equal(added[added.indexOf("社3") + 1], "社1");
+});
+
+test("かたまりの最後はどこにもつながない", () => {
+  const blocks = blocksOf([
+    { place: museum, role: "primer", linkNext: true },
+    { place: main, role: "anchor", linkNext: true },
+  ]);
+  assert.equal(blocks.length, 1);
+  assert.ok(!blocks[0][1].linkNext);
 });

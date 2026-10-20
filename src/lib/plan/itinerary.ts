@@ -3,8 +3,8 @@
 import type { AreaPlaces, Place } from "@/lib/types";
 
 export type Role = "primer" | "anchor" | "kin" | "extra";
-// fixed: 並べ直しても、行程の中のこの位置（何番目か）から動かさない
-export type Stop = { place: Place; role: Role; fixed?: boolean };
+// linkNext: すぐ次の地点とつなぐ。つないだ2か所は、並べ直しても続けてこの順に回る
+export type Stop = { place: Place; role: Role; linkNext?: boolean };
 export type TimedStop = Stop & { driveMin: number; arrive: number; depart: number; stayMin: number };
 export type Plan = { start: number; stops: TimedStop[]; returnMin: number; home: number; overMin: number };
 
@@ -112,9 +112,19 @@ export function insertKin(stops: Stop[], kin: Stop, home: [number, number], star
   return best ?? [...stops, kin];
 }
 
-// 予習先が本命より前にあることと、固定した地点の位置を守って、帰りがいちばん早くなる順に並べ直す。
-// 動かせる地点が8か所までなら全部の順番を試し、それより多いときは区間を裏返す改善（2-opt）で縮める。
-// 固定のせいで「予習が本命より前」を守れないときは、今の順のままにする
+// つないだ地点どうしを、ひとかたまりにまとめる。かたまりの最後はどこにもつながない
+export function blocksOf(stops: Stop[]): Stop[][] {
+  const blocks: Stop[][] = [];
+  stops.forEach((s, i) => {
+    if (i > 0 && stops[i - 1].linkNext) blocks[blocks.length - 1].push(s);
+    else blocks.push([s]);
+  });
+  return blocks.map((b) => (b[b.length - 1].linkNext ? [...b.slice(0, -1), { ...b[b.length - 1], linkNext: false }] : b));
+}
+
+// 予習先が本命より前にあることと、つないだ地点の並びを守って、帰りがいちばん早くなる順に並べ直す。
+// かたまりが8つまでなら全部の順番を試し、それより多いときは区間を裏返す改善（2-opt）で縮める。
+// つなぎ方のせいで「予習が本命より前」を守れないときは、今の順のままにする
 const EXACT_MAX = 8;
 
 const primerFirst = (o: Stop[]) => {
@@ -133,32 +143,25 @@ function* permutations<T>(xs: T[]): Generator<T[]> {
 }
 
 export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60): Stop[] {
-  if (stops.length <= 1) return stops;
-  // 固定した地点はその番目に置いたまま、残りの地点だけで空いた番目を埋める
-  const slots = stops.flatMap((s, i) => (s.fixed ? [] : [i]));
-  const free = stops.filter((s) => !s.fixed);
-  if (free.length <= 1) return stops;
-  const fill = (order: Stop[]) => {
-    const out = [...stops];
-    slots.forEach((slot, k) => (out[slot] = order[k]));
-    return out;
-  };
-  const cost = (order: Stop[]) => {
-    const o = fill(order);
+  const blocks = blocksOf(stops);
+  if (blocks.length <= 1) return blocks.flat();
+  const cost = (order: Stop[][]) => {
+    const o = order.flat();
     return primerFirst(o) ? schedule(o, home, start).home : Infinity;
   };
   // 今の順で同点なら動かさない
-  let best = free;
+  let best = blocks;
   let bestCost = cost(best);
-  if (free.length <= EXACT_MAX) {
-    for (const o of permutations(free)) {
+  if (blocks.length <= EXACT_MAX) {
+    for (const o of permutations(blocks)) {
       const c = cost(o);
       if (c < bestCost) [best, bestCost] = [o, c];
     }
-    return fill(best);
+    return best.flat();
   }
   if (bestCost === Infinity) {
-    const primersFirst = [...free.filter((s) => s.role === "primer"), ...free.filter((s) => s.role !== "primer")];
+    const hasPrimer = (b: Stop[]) => b.some((s) => s.role === "primer");
+    const primersFirst = [...blocks.filter(hasPrimer), ...blocks.filter((b) => !hasPrimer(b))];
     if (cost(primersFirst) < Infinity) [best, bestCost] = [primersFirst, cost(primersFirst)];
   }
   for (let changed = true; changed; ) {
@@ -171,7 +174,7 @@ export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 *
       }
     }
   }
-  return fill(best);
+  return best.flat();
 }
 
 export const clock = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;

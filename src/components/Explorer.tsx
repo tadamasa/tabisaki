@@ -23,7 +23,7 @@ const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query
 const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
 
 // 編集した行程は、この端末のブラウザに地帯ごとに覚えておく
-// 3つ目が 1 の地点は、並べ直しても位置を動かさない
+// 3つ目が 1 の地点は、すぐ次の地点とつないである
 type SavedPlan = { stops: [string, Role, 1?][]; start: number };
 const PLANS_KEY = "tabisaki:plans";
 const DEFAULT_START = 8 * 60;
@@ -129,9 +129,9 @@ export default function Explorer() {
   const stops: Stop[] = !loaded
     ? []
     : saved
-      ? saved.stops.flatMap(([id, role, fixed]) => {
+      ? saved.stops.flatMap(([id, role, link]) => {
           const place = AREA_PLACE(loaded).get(id);
-          return place ? [{ place, role, fixed: fixed === 1 }] : [];
+          return place ? [{ place, role, linkNext: link === 1 }] : [];
         })
       : suggestPlan(loaded, home, undefined, start);
   const plan = loaded ? schedule(stops, home, start) : null;
@@ -140,7 +140,7 @@ export default function Explorer() {
     if (!loaded) return;
     setPlans((prev) => {
       const all = { ...prev };
-      if (next) all[loaded.areaId] = { stops: next.map((s) => (s.fixed ? [s.place.id, s.role, 1] : [s.place.id, s.role])), start: nextStart };
+      if (next) all[loaded.areaId] = { stops: next.map((s) => (s.linkNext ? [s.place.id, s.role, 1] : [s.place.id, s.role])), start: nextStart };
       else delete all[loaded.areaId];
       writePlans(all);
       return all;
@@ -148,7 +148,9 @@ export default function Explorer() {
   };
   // 足したら、全体をいちばん早く帰れる順に組み直す。行程にあれば外す
   const togglePlace = (p: Place) => {
-    if (stops.some((s) => s.place.id === p.id)) return savePlan(stops.filter((s) => s.place.id !== p.id));
+    const at = stops.findIndex((s) => s.place.id === p.id);
+    // 外すときは、前の地点からのつながりも切る
+    if (at >= 0) return savePlan(stops.flatMap((s, k) => (k === at ? [] : k === at - 1 ? [{ ...s, linkNext: false }] : [s])));
     savePlan(optimizeOrder([...stops, { place: p, role: roleFor(p, stops) }], home, start));
   };
   const makeAnchor = (p: Place) => loaded && savePlan(suggestPlan(loaded, home, p.id, start));
