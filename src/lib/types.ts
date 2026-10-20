@@ -53,3 +53,24 @@ export type Atlas = {
     MuniProps
   >;
 };
+
+export type Place = {
+  id: string;
+  kind: "shrine" | "museum" | "info";
+  name: string;
+  lat: number;
+  lng: number;
+  town: string;
+  score: number;
+  reasons: string[];
+  wikipedia: string | null;
+  website: string | null;
+};
+
+export type AreaPlaces = {
+  areaId: string;
+  anchors: (Place & { primer: { place: Place; km: number } | null })[];
+  primers: Place[];
+  shrineCount: number;
+  source: string;
+};

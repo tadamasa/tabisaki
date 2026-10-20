@@ -2,18 +2,21 @@
 
 import maplibregl, { type FilterSpecification, type MapGeoJSONFeature } from "maplibre-gl";
 import { useEffect, useRef } from "react";
-import type { Atlas, BlankArea, MuniProps, Spot } from "@/lib/types";
+import type { AreaPlaces, Atlas, BlankArea, MuniProps, Place, Spot } from "@/lib/types";
 
 type Props = {
   atlas: Atlas;
   maxKm: number;
   selected: BlankArea | null;
+  places: AreaPlaces | null;
+  focus: Place | null;
   onSelectArea: (areaId: string | null) => void;
 };
 
 const GSI_ATTRIBUTION =
   '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noreferrer">地理院タイル</a>' +
-  ' ／ <a href="https://github.com/smartnews-smri/japan-topography" target="_blank" rel="noreferrer">国土数値情報（行政区域）を加工</a>';
+  ' ／ <a href="https://github.com/smartnews-smri/japan-topography" target="_blank" rel="noreferrer">国土数値情報（行政区域）を加工</a>' +
+  ' ／ © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>';
 
 const CATEGORY_LABEL: Record<Spot["cat"], string> = {
   shrine: "神社",
@@ -23,6 +26,8 @@ const CATEGORY_LABEL: Record<Spot["cat"], string> = {
   nature: "自然",
   other: "その他",
 };
+
+const PLACE_LABEL: Record<Place["kind"], string> = { shrine: "本命の候補", museum: "資料館・博物館", info: "観光案内所" };
 
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -61,11 +66,12 @@ function bboxOf(g: import("geojson").Polygon | import("geojson").MultiPolygon) {
 
 const formatDate = (ts: string | null) => (ts ? ts.slice(0, 10).replaceAll("-", "/") : "—");
 
-export default function MapView({ atlas, maxKm, selected, onSelectArea }: Props) {
+export default function MapView({ atlas, maxKm, selected, places, focus, onSelectArea }: Props) {
   const { home } = atlas.summary;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const townLabelsRef = useRef<maplibregl.Marker[]>([]);
+  const placeMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const onSelectRef = useRef(onSelectArea);
   useEffect(() => {
     onSelectRef.current = onSelectArea;
@@ -283,6 +289,41 @@ export default function MapView({ atlas, maxKm, selected, onSelectArea }: Props)
     // atlas は選択のたびに変わらない
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
+
+  // 選んだ地帯の本命候補（赤）と予習先（青）を印で出す
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    placeMarkersRef.current.forEach((m) => m.remove());
+    placeMarkersRef.current = new Map();
+    if (!places) return;
+    for (const p of [...places.primers, ...places.anchors]) {
+      if (placeMarkersRef.current.has(p.id)) continue;
+      const el = document.createElement("div");
+      el.className = `size-3.5 cursor-pointer rounded-full ring-2 ring-white shadow ${p.kind === "shrine" ? "bg-shrine" : "bg-museum"}`;
+      el.title = p.name;
+      const html =
+        `<strong>${escapeHtml(p.name)}</strong><br>${PLACE_LABEL[p.kind]} ・ ${escapeHtml(p.town)}` +
+        (p.reasons.length ? `<br>${p.reasons.map(escapeHtml).join("・")}` : "") +
+        (p.wikipedia ? `<br><a href="${escapeHtml(p.wikipedia)}" target="_blank" rel="noreferrer">Wikipedia</a>` : "") +
+        mapLinks(p.lng, p.lat, `${p.name} ${p.town}`);
+      placeMarkersRef.current.set(
+        p.id,
+        new maplibregl.Marker({ element: el })
+          .setLngLat([p.lng, p.lat])
+          .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(html))
+          .addTo(map),
+      );
+    }
+  }, [places]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !focus) return;
+    map.flyTo({ center: [focus.lng, focus.lat], zoom: Math.max(map.getZoom(), 13) });
+    const m = placeMarkersRef.current.get(focus.id);
+    if (m && !m.getPopup()?.isOpen()) m.togglePopup();
+  }, [focus]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
