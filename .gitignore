@@ -46,3 +46,4 @@ next-env.d.ts
 /data/raw/
 *.xlsx
 /.terrain-cache/
+__pycache__/
