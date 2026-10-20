@@ -70,6 +70,8 @@ export default function Explorer() {
       setData(null);
       setPlaces({});
       await load();
+      // 開いたままの地帯は、その場で候補を取り直す
+      if (selectedId) loadPlaces(selectedId);
     } finally {
       setRefreshing(false);
     }
