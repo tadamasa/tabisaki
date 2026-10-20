@@ -56,12 +56,14 @@ export function findEn(
   const family = familyOf(anchor.name);
   if (!family) return null;
 
-  // 同じ社を何度も記録していることがあるので、名前ごとに最後の訪問だけ残す
+  // 同じ社を何度も記録していることがあるので、町と名前ごとに最後の訪問だけ残す。
+  // 「八幡神社」のようなよくある名前は、町が違えば別の社として数える
   const latest = new Map<string, Spot>();
   for (const s of visited) {
     if (!family.match.test(s.name)) continue;
-    const prev = latest.get(s.name);
-    if (!prev || s.ts > prev.ts) latest.set(s.name, s);
+    const key = `${s.muni ?? `${s.lat.toFixed(3)},${s.lng.toFixed(3)}`}:${s.name}`;
+    const prev = latest.get(key);
+    if (!prev || s.ts > prev.ts) latest.set(key, s);
   }
   const kin = [...latest.values()].sort((a, b) => b.ts.localeCompare(a.ts));
 
