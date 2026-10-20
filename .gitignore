@@ -45,3 +45,5 @@ next-env.d.ts
 /public/data/
 /data/raw/
 *.xlsx
+/.terrain-cache/
+__pycache__/
