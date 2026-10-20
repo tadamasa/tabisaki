@@ -75,13 +75,19 @@ export type AreaPlaces = {
   source: string;
 };
 
-// 本命の社と、同じ系統の社やこれまでの参拝とのつながり
-export type En = {
+// 本命の社と、同じ系統の社・同じ祭神の社・これまでの参拝とのつながり
+export type Visit = { name: string; date: string; town: string | null };
+
+export type Lineage = {
   family: string;
   honsha: string;
   isHonsha: boolean;
   honshaVisited: string | null;
   visitedCount: number;
-  recent: { name: string; date: string; town: string | null }[];
+  recent: Visit[];
   alsoHere: string[];
 };
+
+export type DeityKin = { name: string; visitedCount: number; recent: Visit[] };
+
+export type En = { lineage: Lineage | null; deities: DeityKin[] };

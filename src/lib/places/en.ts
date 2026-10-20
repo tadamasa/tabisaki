@@ -1,6 +1,7 @@
 // 社どうしの「縁」を、同じ系統（同じ神を勧請した社の広がり）と、これまでの参拝記録から読み取る。
 // 系統は社名から推定するので、名前に系統が表れない社には付かない。
-import type { En, Place, Spot } from "@/lib/types";
+import type { DeityKin, En, Lineage, Place, Spot } from "@/lib/types";
+import { normalizeDeity } from "./deity";
 
 type Family = { name: string; match: RegExp; honsha: string[] };
 
@@ -46,34 +47,70 @@ const isHonsha = (f: Family, name: string) => f.honsha.some((h) => name.includes
 
 const formatDate = (ts: string) => ts.slice(0, 10).replaceAll("-", "/");
 
-// visited は訪問済みの神社（新しい順でなくてよい）。townOf は市区町村コードから町名を引く
-export function findEn(
+// 参拝済みの社のうち、祭神がわかったもの
+export type VisitedShrine = { name: string; ts: string; muni: string | null; deities: string[] };
+
+// 同じ社を何度も記録していることがあるので、町と名前ごとに最後の訪問だけ残す。
+// 「八幡神社」のようなよくある名前は、町が違えば別の社として数える
+function latestByShrine<T extends { name: string; ts: string; muni: string | null }>(items: T[], key: (s: T) => string) {
+  const latest = new Map<string, T>();
+  for (const s of items) {
+    const k = key(s);
+    const prev = latest.get(k);
+    if (!prev || s.ts > prev.ts) latest.set(k, s);
+  }
+  return [...latest.values()].sort((a, b) => b.ts.localeCompare(a.ts));
+}
+
+const toVisit = (townOf: (muni: string | null) => string | null) => (s: { name: string; ts: string; muni: string | null }) => ({
+  name: s.name,
+  date: formatDate(s.ts),
+  town: townOf(s.muni),
+});
+
+// visited は訪問済みの神社。townOf は市区町村コードから町名を引く
+export function findLineage(
   anchor: Place,
   visited: Spot[],
   areaShrines: Place[],
   townOf: (muni: string | null) => string | null,
-): En | null {
+): Lineage | null {
   const family = familyOf(anchor.name);
   if (!family) return null;
-
-  // 同じ社を何度も記録していることがあるので、町と名前ごとに最後の訪問だけ残す。
-  // 「八幡神社」のようなよくある名前は、町が違えば別の社として数える
-  const latest = new Map<string, Spot>();
-  for (const s of visited) {
-    if (!family.match.test(s.name)) continue;
-    const key = `${s.muni ?? `${s.lat.toFixed(3)},${s.lng.toFixed(3)}`}:${s.name}`;
-    const prev = latest.get(key);
-    if (!prev || s.ts > prev.ts) latest.set(key, s);
-  }
-  const kin = [...latest.values()].sort((a, b) => b.ts.localeCompare(a.ts));
-
+  const kin = latestByShrine(
+    visited.filter((s) => family.match.test(s.name)),
+    (s) => `${s.muni ?? `${s.lat.toFixed(3)},${s.lng.toFixed(3)}`}:${s.name}`,
+  );
   return {
     family: family.name,
     honsha: family.honsha[0],
     isHonsha: isHonsha(family, anchor.name),
     honshaVisited: kin.find((s) => isHonsha(family, s.name))?.name ?? null,
     visitedCount: kin.length,
-    recent: kin.slice(0, 3).map((s) => ({ name: s.name, date: formatDate(s.ts), town: townOf(s.muni) })),
+    recent: kin.slice(0, 3).map(toVisit(townOf)),
     alsoHere: areaShrines.filter((p) => p.id !== anchor.id && family.match.test(p.name)).map((p) => p.name),
   };
+}
+
+// 本命の祭神ごとに、同じ神を祀る参拝済みの社を集める。
+// 同じ系統の社は系統の縁で数えているので除き、名前からはわからないつながりだけを残す
+export function findDeityKin(
+  anchorName: string,
+  deities: string[],
+  visited: VisitedShrine[],
+  townOf: (muni: string | null) => string | null,
+): DeityKin[] {
+  const family = familyOf(anchorName);
+  return deities.map((name) => {
+    const key = normalizeDeity(name);
+    const kin = latestByShrine(
+      visited.filter((v) => !family?.match.test(v.name) && v.deities.some((d) => normalizeDeity(d) === key)),
+      (s) => `${s.muni}:${s.name}`,
+    );
+    return { name, visitedCount: kin.length, recent: kin.slice(0, 2).map(toVisit(townOf)) };
+  });
+}
+
+export function findEn(lineage: Lineage | null, deities: DeityKin[]): En | null {
+  return lineage || deities.length > 0 ? { lineage, deities } : null;
 }
