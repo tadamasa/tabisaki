@@ -1,0 +1,190 @@
+"use client";
+
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useState } from "react";
+import type { BlankArea, Spot, Summary } from "@/lib/types";
+
+const MapView = dynamic(() => import("./MapView"), {
+  ssr: false,
+  loading: () => <div className="grid h-full place-items-center text-muted">地図を読み込み中…</div>,
+});
+
+type Data = { summary: Summary; areas: BlankArea[]; spots: Spot[] };
+
+const DISTANCES = [
+  { km: 100, label: "100km" },
+  { km: 200, label: "200km" },
+  { km: 300, label: "300km" },
+  { km: 5000, label: "全国" },
+];
+
+const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
+
+export default function Explorer() {
+  const [data, setData] = useState<Data | null>(null);
+  const [error, setError] = useState(false);
+  const [maxKm, setMaxKm] = useState(100);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all(
+      ["summary.json", "blank-areas.json", "spots.json"].map((f) =>
+        fetch(`/data/${f}`).then((r) => {
+          if (!r.ok) throw new Error(f);
+          return r.json();
+        }),
+      ),
+    )
+      .then(([summary, areas, spots]) => setData({ summary, areas, spots }))
+      .catch(() => setError(true));
+  }, []);
+
+  const areas = useMemo(
+    () => (data?.areas ?? []).filter((a) => a.km < maxKm),
+    [data, maxKm],
+  );
+  const selected = data?.areas.find((a) => a.id === selectedId) ?? null;
+
+  if (error) {
+    return (
+      <main className="grid h-dvh place-items-center p-6 text-center">
+        <div className="max-w-md space-y-3">
+          <h1 className="text-xl font-semibold">訪問データがまだありません</h1>
+          <p className="text-muted">
+            縁泉のエクスポートから地図用データを作ってください。
+          </p>
+          <code className="block rounded bg-surface p-3 text-sm">
+            npm run build-data -- --ensen path/to/ensen.xlsx
+          </code>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="flex h-dvh flex-col md:flex-row">
+      <section className="relative h-[55dvh] shrink-0 md:order-2 md:h-full md:flex-1">
+        {data ? (
+          <MapView
+            home={data.summary.home}
+            spots={data.spots}
+            maxKm={maxKm}
+            selected={selected}
+            onSelectArea={setSelectedId}
+          />
+        ) : (
+          <div className="grid h-full place-items-center text-muted">読み込み中…</div>
+        )}
+      </section>
+
+      <aside className="flex min-h-0 flex-1 flex-col border-border bg-surface md:order-1 md:w-[380px] md:flex-none md:border-r">
+        <header className="border-b border-border px-4 pb-3 pt-4">
+          <h1 className="text-lg font-semibold">次はどこへ</h1>
+          {data && (
+            <p className="mt-1 text-sm text-muted">
+              記録のある町 <strong className="text-foreground">{data.summary.visited}</strong> /{" "}
+              {data.summary.municipalities.toLocaleString()} ・ 100km圏の未訪問{" "}
+              <strong className="text-foreground">{data.summary.unvisitedByBand[0].count}</strong> 町
+            </p>
+          )}
+          <div className="mt-3 flex gap-2" role="group" aria-label="自宅からの距離">
+            {DISTANCES.map((d) => (
+              <button
+                key={d.km}
+                type="button"
+                onClick={() => setMaxKm(d.km)}
+                aria-pressed={maxKm === d.km}
+                className={`min-h-9 rounded-full border px-3 text-sm ${
+                  maxKm === d.km
+                    ? "border-area bg-area text-white"
+                    : "border-border text-foreground hover:bg-background"
+                }`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+            <li className="flex items-center gap-1.5">
+              <span className="inline-block size-3 rounded-sm bg-visited/60" />
+              行った町
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span className="inline-block size-3 rounded-sm bg-area/40" />
+              まだの町がまとまる地帯
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span className="inline-block size-2.5 rounded-full bg-shrine" />
+              神社
+            </li>
+            <li className="flex items-center gap-1.5">
+              <span className="inline-block size-2.5 rounded-full bg-museum" />
+              資料館
+            </li>
+          </ul>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <h2 className="px-4 pb-1 pt-3 text-xs font-semibold tracking-wide text-muted">
+            まだ行っていない町がまとまっている地帯（{areas.length}）
+          </h2>
+          <ol>
+            {areas.map((a) => {
+              const isOpen = a.id === selectedId;
+              return (
+                <li key={a.id} className="border-b border-border">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(isOpen ? null : a.id)}
+                    aria-expanded={isOpen}
+                    className={`flex w-full items-baseline justify-between gap-3 px-4 py-3 text-left ${
+                      isOpen ? "bg-area/10" : "hover:bg-background"
+                    }`}
+                  >
+                    <span>
+                      <span className="font-medium">{a.label}</span>
+                      <span className="ml-2 text-xs text-muted">{a.pref.join("・")}</span>
+                    </span>
+                    <span className="shrink-0 text-sm text-muted">
+                      {a.towns.length}町 ・ {a.km}km〜
+                    </span>
+                  </button>
+                  {isOpen && (
+                    <div className="px-4 pb-4">
+                      <ul className="flex flex-wrap gap-1.5">
+                        {a.towns.map((t) => (
+                          <li key={t.id}>
+                            <a
+                              href={wikiLink(t.name.match(/[市区町村]$/) ? t.name : `${t.pref}${t.name}`)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex min-h-8 items-center rounded-full border border-border px-2.5 text-sm hover:border-area"
+                            >
+                              {t.name}
+                              <span className="ml-1 text-xs text-muted">{t.km}km</span>
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-3 text-sm">
+                        <a
+                          className="text-museum underline"
+                          href={mapsLink(`${a.towns[0].pref}${a.towns[0].name} 神社`)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          この地帯の神社をGoogleマップで見る
+                        </a>
+                      </p>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </aside>
+    </main>
+  );
+}

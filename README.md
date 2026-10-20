@@ -1,36 +1,25 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 旅先 — 次はどこへ
 
-## Getting Started
+縁泉（ライフログ）の訪問履歴から、まだ行っていない市町村を中心に次の旅先を探す Web アプリ。PC・スマホ両対応。
 
-First, run the development server:
+計画書と分析はプロジェクトの共有フォルダ（`travel-planner/plan.md`、`travel-planner/ensen-analysis.md`）にあります。
+
+## いまできること（P0）
+
+- 訪問した町（緑）と、まだ行っていない町がまとまっている「空白地帯」（橙）を地図に表示
+- 自宅からの距離（100 / 200 / 300km / 全国）で空白地帯を絞り込み、町の一覧と詳細リンクを表示
+- 訪問したスポットを点で表示（赤＝神社、青＝資料館）。タップで日付とメモ
+
+## 使い方
 
 ```bash
+npm install
+# 縁泉のエクスポートから地図用データを作る（public/data/ に出力。個人データなのでコミットしない）
+npm run build-data -- --ensen path/to/ensen.xlsx [--home 緯度,経度]
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## データの出典
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- 地図: [地理院タイル（淡色地図）](https://maps.gsi.go.jp/development/ichiran.html)
+- 行政区域: 国土数値情報（行政区域データ、2021年1月1日）を [SmartNews メディア研究所](https://github.com/smartnews-smri/japan-topography) が簡素化したもの。政令指定都市は市単位

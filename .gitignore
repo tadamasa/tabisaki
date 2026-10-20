@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 個人の訪問履歴から生成するデータ（コミットしない）
+/public/data/
+/data/raw/
+*.xlsx
