@@ -38,3 +38,4 @@ npm run dev
 - 地図: [地理院タイル（淡色地図）](https://maps.gsi.go.jp/development/ichiran.html)
 - 行政区域（`data/boundaries/`）: 国土数値情報（行政区域データ、2021年1月1日）を [SmartNews メディア研究所](https://github.com/smartnews-smri/japan-topography) が簡素化したもの。政令指定都市は市単位
 - 神社・資料館・観光案内所: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors（ODbL）。Overpass API で検索し、地帯ごとに1日キャッシュ
+- 祭神: [Wikipedia 日本語版](https://ja.wikipedia.org/)の神社記事の基礎情報（CC BY-SA 4.0）。記事の座標が実際の場所から 1.5km 以内のときだけ同じ社とみなす

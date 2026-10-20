@@ -69,8 +69,25 @@ export type Place = {
 
 export type AreaPlaces = {
   areaId: string;
-  anchors: (Place & { primer: { place: Place; km: number } | null })[];
+  anchors: (Place & { primer: { place: Place; km: number } | null; en: En | null })[];
   primers: Place[];
   shrineCount: number;
   source: string;
 };
+
+// 本命の社と、同じ系統の社・同じ祭神の社・これまでの参拝とのつながり
+export type Visit = { name: string; date: string; town: string | null };
+
+export type Lineage = {
+  family: string;
+  honsha: string;
+  isHonsha: boolean;
+  honshaVisited: string | null;
+  visitedCount: number;
+  recent: Visit[];
+  alsoHere: string[];
+};
+
+export type DeityKin = { name: string; visitedCount: number; recent: Visit[] };
+
+export type En = { lineage: Lineage | null; deities: DeityKin[] };

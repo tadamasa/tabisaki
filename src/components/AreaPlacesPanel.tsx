@@ -1,6 +1,6 @@
 "use client";
 
-import type { AreaPlaces, Place } from "@/lib/types";
+import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
 
@@ -14,6 +14,35 @@ function PlaceName({ place }: { place: Place }) {
     <a href={place.wikipedia ?? mapsLink(place)} target="_blank" rel="noreferrer" className="font-medium underline-offset-2 hover:underline">
       {place.name}
     </a>
+  );
+}
+
+// 系統・祭神と、これまでの参拝とのつながりを短い文にする
+const visitText = (v: Visit) => `${v.name}${v.town ? `（${v.town}）` : ""} ${v.date}`;
+
+function EnNote({ en }: { en: En }) {
+  const lines: string[] = [];
+  const l = en.lineage;
+  if (l) {
+    if (l.isHonsha) lines.push(`${l.family}系の総本社・本源とされる社`);
+    else if (l.honshaVisited) lines.push(`${l.family}系。本源の${l.honshaVisited}には参拝済み`);
+    else lines.push(`${l.family}系。本源は${l.honsha}（未訪問）`);
+    if (l.visitedCount > 0) lines.push(`これまで同じ系統の社を${l.visitedCount}社訪問。最近は${visitText(l.recent[0])}`);
+    if (l.alsoHere.length > 0) lines.push(`この地帯にも ${l.alsoHere.join("・")}`);
+  }
+  if (en.deities.length > 0) {
+    lines.push(`祭神: ${en.deities.map((d) => d.name).join("・")}`);
+    for (const d of en.deities.filter((d) => d.visitedCount > 0)) {
+      lines.push(`${d.name}を祀る社に${d.visitedCount}社参拝済み（${d.recent.map(visitText).join("、")}${d.visitedCount > d.recent.length ? " など" : ""}）`);
+    }
+  }
+  return (
+    <div className="mt-1.5 border-l-2 border-shrine/40 pl-2 text-xs text-muted">
+      <span className="font-medium text-foreground">縁</span>
+      {lines.map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+    </div>
   );
 }
 
@@ -64,6 +93,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
                     ))}
                   </ul>
                 )}
+                {a.en && <EnNote en={a.en} />}
                 {a.primer && (
                   <p className="mt-1.5 text-xs text-muted">
                     先に{" "}
