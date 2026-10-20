@@ -39,3 +39,23 @@ test("本命ごとにいちばん近い資料館・案内所を組み、遠す�
   assert.equal(pairPrimer(yoshino, r.primers)?.place.name, "吉野歴史資料館");
   assert.equal(pairPrimer({ ...yoshino, lng: 137.5 }, r.primers), null);
 });
+
+test("博物館・美術館は目的地の候補として、公立の館を上に出す。美術館は予習先に含めない", () => {
+  const r = rankPlaces(
+    [
+      ...elements,
+      node(9, 135.57, 34.37, { tourism: "museum", museum: "art", name: "かつらぎ町立美術館" }),
+      node(10, 135.87, 34.37, { tourism: "museum", name: "奈良県立吉野博物館" }),
+      node(11, 135.88, 34.38, { tourism: "gallery", name: "山のギャラリー" }),
+    ],
+    towns,
+  );
+  assert.deepEqual(r.halls.map((h) => [h.name, h.kind]), [
+    ["奈良県立吉野博物館", "museum"],
+    ["かつらぎ町立美術館", "art"],
+    ["吉野歴史資料館", "museum"],
+    ["山のギャラリー", "art"],
+  ]);
+  assert.deepEqual(r.halls[0].reasons, ["公立"]);
+  assert.ok(!r.primers.some((p) => p.kind === "art"));
+});

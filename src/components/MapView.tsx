@@ -13,6 +13,11 @@ type Props = {
   route: { home: [number, number]; stops: TimedStop[] } | null;
   focus: Place | null;
   onSelectArea: (areaId: string | null) => void;
+  // 吹き出しから行程を編集する
+  planIds: Set<string>;
+  anchorId: string | null;
+  onTogglePlace: (p: Place) => void;
+  onMakeAnchor: (p: Place) => void;
 };
 
 const GSI_ATTRIBUTION =
@@ -29,7 +34,8 @@ const CATEGORY_LABEL: Record<Spot["cat"], string> = {
   other: "その他",
 };
 
-const PLACE_LABEL: Record<Place["kind"], string> = { shrine: "本命の候補", museum: "資料館・博物館", info: "観光案内所" };
+const PLACE_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", art: "美術館", info: "観光案内所" };
+const PLACE_BG: Record<Place["kind"], string> = { shrine: "bg-shrine", museum: "bg-museum", art: "bg-art", info: "bg-museum" };
 
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -68,7 +74,32 @@ function bboxOf(g: import("geojson").Polygon | import("geojson").MultiPolygon) {
 
 const formatDate = (ts: string | null) => (ts ? ts.slice(0, 10).replaceAll("-", "/") : "—");
 
-const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: "#3b6fb6", anchor: "#c2412d", kin: "#e07a5f" };
+const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: "#3b6fb6", anchor: "#c2412d", kin: "#e07a5f", extra: "#7b4fa0" };
+
+type PlanEdit = Pick<Props, "planIds" | "anchorId" | "onTogglePlace" | "onMakeAnchor">;
+
+// 吹き出しの下に並べる「本命にする」「＋行程／行程から外す」
+function renderActions(box: HTMLElement, place: Place, plan: PlanEdit) {
+  box.replaceChildren();
+  const button = (text: string, color: string, onClick: () => void) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = text;
+    b.style.cssText = `min-height:32px;padding:0 12px;border-radius:999px;border:1px solid ${color};color:${color};background:#fff;font-size:13px;cursor:pointer`;
+    b.addEventListener("click", onClick);
+    box.append(b);
+  };
+  if (place.id === plan.anchorId) {
+    const s = document.createElement("span");
+    s.textContent = "行程の本命です";
+    s.style.cssText = "color:#c2412d;font-size:13px;font-weight:600";
+    box.append(s);
+    return;
+  }
+  if (place.kind !== "info") button("本命にする", "#c2412d", () => plan.onMakeAnchor(place));
+  const inPlan = plan.planIds.has(place.id);
+  button(inPlan ? "行程から外す" : "＋行程", inPlan ? "#6b665c" : "#3b6fb6", () => plan.onTogglePlace(place));
+}
 
 const routeData = (route: Props["route"]): import("geojson").FeatureCollection => ({
   type: "FeatureCollection",
@@ -86,13 +117,22 @@ const routeData = (route: Props["route"]): import("geojson").FeatureCollection =
     : [],
 });
 
-export default function MapView({ atlas, maxKm, selected, places, route, focus, onSelectArea }: Props) {
+export default function MapView({ atlas, maxKm, selected, places, route, focus, onSelectArea, ...plan }: Props) {
   const { home } = atlas.summary;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const townLabelsRef = useRef<maplibregl.Marker[]>([]);
   const placeMarkersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
   const routeMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const actionBoxesRef = useRef<Map<string, { box: HTMLElement; place: Place; popup: maplibregl.Popup }>>(new Map());
+  const planRef = useRef<PlanEdit>(plan);
+  useEffect(() => {
+    planRef.current = plan;
+    // 開いている吹き出しのボタンを、行程の今の状態に合わせる
+    for (const { box, place, popup } of actionBoxesRef.current.values()) {
+      if (popup.isOpen()) renderActions(box, place, plan);
+    }
+  });
   const onSelectRef = useRef(onSelectArea);
   useEffect(() => {
     onSelectRef.current = onSelectArea;
@@ -193,6 +233,10 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         .setPopup(new maplibregl.Popup({ offset: 24 }).setText("自宅"))
         .addTo(map);
       updateSpotLabels();
+      // 狭い画面では出典の表示が地図を覆うので、ⓘを押したときだけ開く
+      if (map.getContainer().clientWidth < 640) {
+        map.getContainer().querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show");
+      }
     });
 
     // 拡大したときだけ、画面内の訪問スポットに名前を出す
@@ -237,7 +281,8 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
     });
 
     map.on("click", (e) => {
-      if (e.defaultPrevented) return;
+      // 印（マーカー）を押したときは、その吹き出しだけを出す
+      if (e.defaultPrevented || (e.originalEvent.target as HTMLElement).closest(".maplibregl-marker")) return;
       const f = map.queryRenderedFeatures(e.point, { layers: ["muni-line", "muni-visited", "muni-area"] })[0];
       if (!f) return;
       const p = f.properties as unknown as MuniProps;
@@ -257,7 +302,14 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
       map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
     }
 
-    return () => map.remove();
+    // 地図の枠の大きさが変わったら描き直す
+    const resize = new ResizeObserver(() => map.resize());
+    resize.observe(containerRef.current);
+
+    return () => {
+      resize.disconnect();
+      map.remove();
+    };
     // 地図は一度だけ作る。以降の変化は下の effect で反映する
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -317,24 +369,27 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
     if (!map) return;
     placeMarkersRef.current.forEach((m) => m.remove());
     placeMarkersRef.current = new Map();
+    actionBoxesRef.current = new Map();
     if (!places) return;
-    for (const p of [...places.primers, ...places.anchors]) {
+    for (const p of [...places.primers, ...(places.halls ?? []), ...places.anchors]) {
       if (placeMarkersRef.current.has(p.id)) continue;
       const el = document.createElement("div");
-      el.className = `size-3.5 cursor-pointer rounded-full ring-2 ring-white shadow ${p.kind === "shrine" ? "bg-shrine" : "bg-museum"}`;
+      el.className = `size-3.5 cursor-pointer rounded-full ring-2 ring-white shadow ${PLACE_BG[p.kind]}`;
       el.title = p.name;
-      const html =
+      const content = document.createElement("div");
+      const info = document.createElement("div");
+      info.innerHTML =
         `<strong>${escapeHtml(p.name)}</strong><br>${PLACE_LABEL[p.kind]} ・ ${escapeHtml(p.town)}` +
         (p.reasons.length ? `<br>${p.reasons.map(escapeHtml).join("・")}` : "") +
         (p.wikipedia ? `<br><a href="${escapeHtml(p.wikipedia)}" target="_blank" rel="noreferrer">Wikipedia</a>` : "") +
         mapLinks(p.lng, p.lat, `${p.name} ${p.town}`);
-      placeMarkersRef.current.set(
-        p.id,
-        new maplibregl.Marker({ element: el })
-          .setLngLat([p.lng, p.lat])
-          .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(html))
-          .addTo(map),
-      );
+      const box = document.createElement("div");
+      box.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin-top:8px";
+      content.append(info, box);
+      const popup = new maplibregl.Popup({ offset: 10, maxWidth: "280px" }).setDOMContent(content);
+      popup.on("open", () => renderActions(box, p, planRef.current));
+      actionBoxesRef.current.set(p.id, { box, place: p, popup });
+      placeMarkersRef.current.set(p.id, new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).setPopup(popup).addTo(map));
     }
   }, [places]);
 

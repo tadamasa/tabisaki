@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import { type Role, type Stop, optimizeOrder, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { type Role, type Stop, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
 import type { AreaPlaces, Atlas, Place } from "@/lib/types";
 import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
 import ItineraryPanel from "./ItineraryPanel";
@@ -43,7 +43,8 @@ function writePlans(plans: Record<string, SavedPlan>) {
   }
 }
 
-const AREA_PLACE = (ap: AreaPlaces) => new Map<string, Place>([...ap.anchors, ...ap.primers].map((p) => [p.id, p]));
+const AREA_PLACE = (ap: AreaPlaces) =>
+  new Map<string, Place>([...ap.anchors, ...ap.primers, ...(ap.halls ?? [])].map((p) => [p.id, p]));
 
 async function fetchPlaces(areaId: string): Promise<NonNullable<PlacesState>> {
   try {
@@ -71,6 +72,7 @@ export default function Explorer() {
   // 地帯ごとの神社・資料館の候補。開いたときに一度だけ取りに行く
   const [places, setPlaces] = useState<Record<string, NonNullable<PlacesState>>>({});
   const [focus, setFocus] = useState<Place | null>(null);
+  const [tab, setTab] = useState<"plan" | "places">("plan");
   const [plans, setPlans] = useState<Record<string, SavedPlan>>(() => (typeof window === "undefined" ? {} : readPlans()));
 
   const load = () => fetchAtlas().then(setData, (e: Error) => setError(e.message));
@@ -81,6 +83,14 @@ export default function Explorer() {
 
   const loadPlaces = (areaId: string) =>
     fetchPlaces(areaId).then((r) => setPlaces((prev) => ({ ...prev, [areaId]: r })));
+  const retryPlaces = (areaId: string) => {
+    setPlaces((prev) => {
+      const next = { ...prev };
+      delete next[areaId];
+      return next;
+    });
+    loadPlaces(areaId);
+  };
 
   useEffect(() => {
     if (selectedId && !places[selectedId]) loadPlaces(selectedId);
@@ -135,9 +145,24 @@ export default function Explorer() {
       return all;
     });
   };
-  // 足したら、全体をいちばん早く帰れる順に組み直す。社はゆかり、資料館・案内所は予習として入れる
-  const addToPlan = (p: Place) =>
-    savePlan(optimizeOrder([...stops, { place: p, role: p.kind === "shrine" ? "kin" : "primer" }], home, start));
+  // 足したら、全体をいちばん早く帰れる順に組み直す。行程にあれば外す
+  const togglePlace = (p: Place) => {
+    if (stops.some((s) => s.place.id === p.id)) return savePlan(stops.filter((s) => s.place.id !== p.id));
+    savePlan(optimizeOrder([...stops, { place: p, role: roleFor(p, stops) }], home, start));
+  };
+  const makeAnchor = (p: Place) => loaded && savePlan(suggestPlan(loaded, home, p.id, start));
+  const reorder = () => {
+    const next = optimizeOrder(stops, home, start);
+    const changed = next.some((s, i) => s.place.id !== stops[i].place.id);
+    savePlan(next);
+    return changed;
+  };
+  const planIds = new Set(stops.map((s) => s.place.id));
+  const anchorId = stops.find((s) => s.role === "anchor")?.place.id ?? null;
+  const selectArea = (id: string | null) => {
+    setSelectedId(id);
+    setTab("plan");
+  };
 
   if (error) {
     return (
@@ -162,7 +187,8 @@ export default function Explorer() {
 
   return (
     <main className="flex h-dvh flex-col md:flex-row">
-      <section className="relative h-[55dvh] shrink-0 md:order-2 md:h-full md:flex-1">
+      {/* スマホでは、地帯を開いたら地図を少し縮めて行程と候補に場所を譲る */}
+      <section className={`relative shrink-0 md:order-2 md:h-full md:flex-1 ${selected ? "h-[40dvh]" : "h-[55dvh]"}`}>
         {data ? (
           <MapView
             atlas={data}
@@ -171,7 +197,11 @@ export default function Explorer() {
             places={loaded}
             route={plan && plan.stops.length > 0 ? { home, stops: plan.stops } : null}
             focus={focus}
-            onSelectArea={setSelectedId}
+            onSelectArea={selectArea}
+            planIds={planIds}
+            anchorId={anchorId}
+            onTogglePlace={togglePlace}
+            onMakeAnchor={makeAnchor}
           />
         ) : (
           <div className="grid h-full place-items-center text-muted">読み込み中…</div>
@@ -179,148 +209,191 @@ export default function Explorer() {
       </section>
 
       <aside className="flex min-h-0 flex-1 flex-col border-border bg-surface md:order-1 md:w-[380px] md:flex-none md:border-r">
-        <header className="border-b border-border px-4 pb-3 pt-4">
-          <div className="flex items-baseline justify-between gap-3">
-            <h1 className="text-lg font-semibold">次はどこへ</h1>
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={refreshing}
-              className="text-xs text-museum underline disabled:text-muted disabled:no-underline"
-            >
-              {refreshing ? "読み込み中…" : "縁泉の最新の記録を読む"}
-            </button>
-          </div>
-          {data && (
-            <p className="mt-1 text-sm text-muted">
-              記録のある町 <strong className="text-foreground">{data.summary.visited}</strong> /{" "}
-              {data.summary.municipalities.toLocaleString()} ・ 100km圏の未訪問{" "}
-              <strong className="text-foreground">{data.summary.unvisitedByBand[0].count}</strong> 町
-            </p>
-          )}
-          <div className="mt-3 flex gap-2" role="group" aria-label="自宅からの距離">
-            {DISTANCES.map((d) => (
-              <button
-                key={d.km}
-                type="button"
-                onClick={() => setMaxKm(d.km)}
-                aria-pressed={maxKm === d.km}
-                className={`min-h-9 rounded-full border px-3 text-sm ${
-                  maxKm === d.km
-                    ? "border-area bg-area text-white"
-                    : "border-border text-foreground hover:bg-background"
-                }`}
-              >
-                {d.label}
-              </button>
-            ))}
-          </div>
-          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-            <li className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-sm bg-visited/60" />
-              行った町
-            </li>
-            <li className="flex items-center gap-1.5">
-              <span className="inline-block size-3 rounded-sm bg-area/40" />
-              まだの町がまとまる地帯
-            </li>
-            <li className="flex items-center gap-1.5">
-              <span className="inline-block size-2.5 rounded-full bg-shrine" />
-              神社
-            </li>
-            <li className="flex items-center gap-1.5">
-              <span className="inline-block size-2.5 rounded-full bg-museum" />
-              資料館
-            </li>
-          </ul>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <h2 className="px-4 pb-1 pt-3 text-xs font-semibold tracking-wide text-muted">
-            まだ行っていない町がまとまっている地帯（{areas.length}）
-          </h2>
-          <ol>
-            {areas.map((a) => {
-              const isOpen = a.id === selectedId;
-              return (
-                <li key={a.id} className="border-b border-border">
+        {selected ? (
+          // 地帯を選んだら、一覧の代わりにその地帯の画面を出す。行程と候補はタブで切り替える
+          <>
+            <header className="border-b border-border px-3 pt-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => selectArea(null)}
+                  className="min-h-10 shrink-0 rounded-full px-2 text-sm text-museum hover:bg-background"
+                  aria-label="地帯の一覧へ戻る"
+                >
+                  ← 一覧
+                </button>
+                <h2 className="min-w-0 flex-1 truncate font-semibold">{selected.label}</h2>
+                <span className="shrink-0 text-xs text-muted">
+                  {selected.towns.length}町 ・ {selected.km}km〜
+                </span>
+              </div>
+              <div className="mt-1 flex" role="tablist">
+                {(
+                  [
+                    ["plan", `行程${stops.length ? `（${stops.length}）` : ""}`],
+                    ["places", "候補"],
+                  ] as const
+                ).map(([key, text]) => (
                   <button
+                    key={key}
                     type="button"
-                    onClick={() => setSelectedId(isOpen ? null : a.id)}
-                    aria-expanded={isOpen}
-                    className={`flex w-full items-baseline justify-between gap-3 px-4 py-3 text-left ${
-                      isOpen ? "bg-area/10" : "hover:bg-background"
+                    role="tab"
+                    aria-selected={tab === key}
+                    onClick={() => setTab(key)}
+                    className={`min-h-10 flex-1 border-b-2 text-sm ${
+                      tab === key ? "border-area font-semibold text-foreground" : "border-transparent text-muted"
                     }`}
                   >
-                    <span>
-                      <span className="font-medium">{a.label}</span>
-                      <span className="ml-2 text-xs text-muted">{a.pref.join("・")}</span>
-                    </span>
-                    <span className="shrink-0 text-sm text-muted">
-                      {a.towns.length}町 ・ {a.km}km〜
-                    </span>
+                    {text}
                   </button>
-                  {isOpen && (
-                    <div className="px-4 pb-4">
-                      <ul className="flex flex-wrap gap-1.5">
-                        {a.towns.map((t) => (
-                          <li key={t.id}>
-                            <a
-                              href={wikiLink(t.name.match(/[市区町村]$/) ? t.name : `${t.pref}${t.name}`)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex min-h-8 items-center rounded-full border border-border px-2.5 text-sm hover:border-area"
-                            >
-                              {t.name}
-                              <span className="ml-1 text-xs text-muted">{t.km}km</span>
-                            </a>
-                          </li>
-                        ))}
-                      </ul>
-                      {plan && (
-                        <ItineraryPanel
-                          plan={plan}
-                          home={home}
-                          onChange={(next) => savePlan(next)}
-                          onStart={(min) => savePlan(stops, min)}
-                          onReset={() => savePlan(null)}
-                          onOptimize={() => savePlan(optimizeOrder(stops, home, start))}
-                          onFocus={setFocus}
-                        />
-                      )}
-                      <AreaPlacesPanel
-                        state={selectedPlaces}
-                        planIds={new Set(stops.map((s) => s.place.id))}
-                        anchorId={stops.find((s) => s.role === "anchor")?.place.id ?? null}
-                        onAdd={addToPlan}
-                        onMakeAnchor={(p) => loaded && savePlan(optimizeOrder(suggestPlan(loaded, home, p.id, start), home, start))}
-                        onRetry={() => {
-                          setPlaces((prev) => {
-                            const next = { ...prev };
-                            delete next[a.id];
-                            return next;
-                          });
-                          loadPlaces(a.id);
-                        }}
-                        onFocus={setFocus}
-                      />
-                      <p className="mt-3 text-sm">
-                        <a
-                          className="text-museum underline"
-                          href={mapsLink(`${a.towns[0].pref}${a.towns[0].name} 神社`)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          ほかの神社もGoogleマップで見る
-                        </a>
-                      </p>
-                    </div>
-                  )}
+                ))}
+              </div>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3">
+              {tab === "plan" ? (
+                plan ? (
+                  <ItineraryPanel
+                    plan={plan}
+                    home={home}
+                    onChange={(next) => savePlan(next)}
+                    onStart={(min) => savePlan(stops, min)}
+                    onReset={() => savePlan(null)}
+                    onOptimize={reorder}
+                    onFocus={setFocus}
+                  />
+                ) : (
+                  <AreaPlacesPanel state={selectedPlaces} onRetry={() => retryPlaces(selected.id)} onFocus={setFocus} planIds={planIds} anchorId={anchorId} onToggle={togglePlace} onMakeAnchor={makeAnchor} />
+                )
+              ) : (
+                <>
+                  <AreaPlacesPanel
+                    state={selectedPlaces}
+                    planIds={planIds}
+                    anchorId={anchorId}
+                    onToggle={togglePlace}
+                    onMakeAnchor={makeAnchor}
+                    onRetry={() => retryPlaces(selected.id)}
+                    onFocus={setFocus}
+                  />
+                  <p className="mt-4 text-sm">
+                    <a
+                      className="text-museum underline"
+                      href={mapsLink(`${selected.towns[0].pref}${selected.towns[0].name} 神社`)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      ほかの神社もGoogleマップで見る
+                    </a>
+                  </p>
+                </>
+              )}
+              <h3 className="mt-6 text-xs font-semibold tracking-wide text-muted">この地帯のまだ行っていない町</h3>
+              <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                {selected.towns.map((t) => (
+                  <li key={t.id}>
+                    <a
+                      href={wikiLink(t.name.match(/[市区町村]$/) ? t.name : `${t.pref}${t.name}`)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex min-h-8 items-center rounded-full border border-border px-2.5 text-sm hover:border-area"
+                    >
+                      {t.name}
+                      <span className="ml-1 text-xs text-muted">{t.km}km</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        ) : (
+          <>
+            <header className="border-b border-border px-4 pb-3 pt-4">
+              <div className="flex items-baseline justify-between gap-3">
+                <h1 className="text-lg font-semibold">次はどこへ</h1>
+                <button
+                  type="button"
+                  onClick={refresh}
+                  disabled={refreshing}
+                  className="text-xs text-museum underline disabled:text-muted disabled:no-underline"
+                >
+                  {refreshing ? "読み込み中…" : "縁泉の最新の記録を読む"}
+                </button>
+              </div>
+              {data && (
+                <p className="mt-1 text-sm text-muted">
+                  記録のある町 <strong className="text-foreground">{data.summary.visited}</strong> /{" "}
+                  {data.summary.municipalities.toLocaleString()} ・ 100km圏の未訪問{" "}
+                  <strong className="text-foreground">{data.summary.unvisitedByBand[0].count}</strong> 町
+                </p>
+              )}
+              <div className="mt-3 flex gap-2" role="group" aria-label="自宅からの距離">
+                {DISTANCES.map((d) => (
+                  <button
+                    key={d.km}
+                    type="button"
+                    onClick={() => setMaxKm(d.km)}
+                    aria-pressed={maxKm === d.km}
+                    className={`min-h-9 rounded-full border px-3 text-sm ${
+                      maxKm === d.km
+                        ? "border-area bg-area text-white"
+                        : "border-border text-foreground hover:bg-background"
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+                <li className="flex items-center gap-1.5">
+                  <span className="inline-block size-3 rounded-sm bg-visited/60" />
+                  行った町
                 </li>
-              );
-            })}
-          </ol>
-        </div>
+                <li className="flex items-center gap-1.5">
+                  <span className="inline-block size-3 rounded-sm bg-area/40" />
+                  まだの町がまとまる地帯
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="inline-block size-2.5 rounded-full bg-shrine" />
+                  神社
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="inline-block size-2.5 rounded-full bg-museum" />
+                  資料館・博物館
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="inline-block size-2.5 rounded-full bg-art" />
+                  美術館
+                </li>
+              </ul>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <h2 className="px-4 pb-1 pt-3 text-xs font-semibold tracking-wide text-muted">
+                まだ行っていない町がまとまっている地帯（{areas.length}）
+              </h2>
+              <ol>
+                {areas.map((a) => (
+                  <li key={a.id} className="border-b border-border">
+                    <button
+                      type="button"
+                      onClick={() => selectArea(a.id)}
+                      className="flex min-h-12 w-full items-baseline justify-between gap-3 px-4 py-3 text-left hover:bg-background"
+                    >
+                      <span>
+                        <span className="font-medium">{a.label}</span>
+                        <span className="ml-2 text-xs text-muted">{a.pref.join("・")}</span>
+                        {plans[a.id] && <span className="ml-2 rounded bg-shrine/10 px-1 text-[11px] text-shrine">行程あり</span>}
+                      </span>
+                      <span className="shrink-0 text-sm text-muted">
+                        {a.towns.length}町 ・ {a.km}km〜
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </>
+        )}
       </aside>
     </main>
   );

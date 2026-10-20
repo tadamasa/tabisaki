@@ -14,7 +14,7 @@ const query = ([w, s, e, n]: number[]) => {
   return `[out:json][timeout:60];
 (
   nwr["amenity"="place_of_worship"]["religion"="shinto"]["name"](${bbox});
-  nwr["tourism"="museum"]["name"](${bbox});
+  nwr["tourism"~"^(museum|gallery)$"]["name"](${bbox});
   nwr["tourism"="information"]["information"~"^(office|visitor_centre)$"]["name"](${bbox});
 );
 out center tags;`;
@@ -115,6 +115,7 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
       ),
     })),
     primers: ranked.primers,
+    halls: ranked.halls,
     shrineCount: ranked.shrineCount,
     source: `OpenStreetMap（${source}）`,
   };

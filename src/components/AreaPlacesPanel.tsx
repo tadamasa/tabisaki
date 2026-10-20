@@ -4,7 +4,7 @@ import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
 
-const KIND_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", info: "観光案内所" };
+const KIND_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", art: "美術館", info: "観光案内所" };
 
 const mapsLink = (p: Place) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.town}`)}`;
@@ -53,27 +53,54 @@ type Props = {
   // 行程の編集
   planIds: Set<string>;
   anchorId: string | null;
-  onAdd: (p: Place) => void;
+  onToggle: (p: Place) => void;
   onMakeAnchor: (p: Place) => void;
 };
 
-function PlanButtons({ place, planIds, anchorId, onAdd, onMakeAnchor }: Pick<Props, "planIds" | "anchorId" | "onAdd" | "onMakeAnchor"> & { place: Place }) {
-  if (place.id === anchorId) return <span className="shrink-0 text-xs text-shrine">本命</span>;
+type PlanProps = Pick<Props, "planIds" | "anchorId" | "onToggle" | "onMakeAnchor">;
+
+// 指で押しやすいよう、ボタンは高さを取る
+const BTN = "inline-flex min-h-8 items-center rounded-full border px-2.5";
+
+function PlanButtons({ place, planIds, anchorId, onToggle, onMakeAnchor }: PlanProps & { place: Place }) {
+  if (place.id === anchorId) return <span className="shrink-0 text-xs font-medium text-shrine">本命</span>;
+  const inPlan = planIds.has(place.id);
   return (
-    <span className="flex shrink-0 gap-2 text-xs">
-      {place.kind === "shrine" && (
-        <button type="button" onClick={() => onMakeAnchor(place)} className="text-shrine underline">
+    <span className="flex shrink-0 flex-wrap justify-end gap-1.5 text-xs">
+      {place.kind !== "info" && (
+        <button type="button" onClick={() => onMakeAnchor(place)} className={`${BTN} border-shrine/40 text-shrine`}>
           本命にする
         </button>
       )}
-      {planIds.has(place.id) ? (
-        <span className="text-muted">行程に入っています</span>
-      ) : (
-        <button type="button" onClick={() => onAdd(place)} className="text-museum underline">
-          ＋行程
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => onToggle(place)}
+        className={`${BTN} ${inPlan ? "border-border text-muted" : "border-museum/40 text-museum"}`}
+      >
+        {inPlan ? "行程から外す" : "＋行程"}
+      </button>
     </span>
+  );
+}
+
+function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFocus: (p: Place) => void }) {
+  return (
+    <li className="flex items-start justify-between gap-2 py-1.5">
+      <span className="min-w-0">
+        <span className={`mr-1.5 inline-block size-2 rounded-full ${place.kind === "art" ? "bg-art" : "bg-museum"}`} />
+        <PlaceName place={place} />
+        <span className="ml-1.5 text-xs text-muted">
+          {KIND_LABEL[place.kind]} ・ {place.town}
+        </span>{" "}
+        <button type="button" onClick={() => onFocus(place)} className="text-xs text-museum underline">
+          地図
+        </button>
+        {place.reasons.length > 0 && (
+          <span className="ml-1.5 text-[11px] text-muted">{place.reasons.join("・")}</span>
+        )}
+      </span>
+      <PlanButtons place={place} {...plan} />
+    </li>
   );
 }
 
@@ -90,12 +117,13 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
     );
   }
 
-  const { anchors, primers, shrineCount, source } = state;
+  const { anchors, primers, halls = [], shrineCount, source } = state;
+  const infos = primers.filter((p) => p.kind === "info");
   return (
     <div className="mt-4 space-y-4">
       <section>
         <h3 className="text-xs font-semibold tracking-wide text-muted">
-          本命の候補（地帯の神社 {shrineCount} 社から）
+          神社（地帯の {shrineCount} 社から）
         </h3>
         {anchors.length === 0 ? (
           <p className="mt-1 text-sm text-muted">名前のわかる神社が見つかりませんでした。</p>
@@ -142,31 +170,28 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
       </section>
 
       <section>
-        <h3 className="text-xs font-semibold tracking-wide text-muted">先に寄る資料館・案内所</h3>
-        {primers.length === 0 ? (
-          <p className="mt-1 text-sm text-muted">地帯の中には見つかりませんでした。隣の町の資料館を探すのがよさそうです。</p>
+        <h3 className="text-xs font-semibold tracking-wide text-muted">博物館・美術館・資料館</h3>
+        {halls.length === 0 ? (
+          <p className="mt-1 text-sm text-muted">地帯の中には見つかりませんでした。隣の町を探すのがよさそうです。</p>
         ) : (
-          <ul className="mt-1 space-y-1 text-sm">
-            {primers.map((p) => (
-              <li key={p.id} className="flex items-baseline justify-between gap-2">
-                <span>
-                  <span className="mr-1.5 inline-block size-2 rounded-full bg-museum" />
-                  <PlaceName place={p} />
-                  <span className="ml-1.5 text-xs text-muted">
-                    {KIND_LABEL[p.kind]} ・ {p.town}
-                  </span>
-                </span>
-                <span className="flex shrink-0 gap-2">
-                  <PlanButtons place={p} {...plan} />
-                  <button type="button" onClick={() => onFocus(p)} className="text-xs text-museum underline">
-                    地図
-                  </button>
-                </span>
-              </li>
+          <ul className="mt-1 divide-y divide-border text-sm">
+            {halls.map((p) => (
+              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
             ))}
           </ul>
         )}
       </section>
+
+      {infos.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">観光案内所</h3>
+          <ul className="mt-1 divide-y divide-border text-sm">
+            {infos.map((p) => (
+              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+            ))}
+          </ul>
+        </section>
+      )}
       <p className="text-[11px] text-muted">出典: {source}。社格などは名前と登録情報からの推定です。</p>
     </div>
   );

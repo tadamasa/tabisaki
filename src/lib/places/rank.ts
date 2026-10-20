@@ -1,4 +1,4 @@
-// 空白地帯の中で、本命になる社と、先に寄る資料館・案内所の候補を選ぶ。
+// 空白地帯の中で、本命になる社と、先に寄る資料館・案内所、目的地にもなる博物館・美術館の候補を選ぶ。
 import * as turf from "@turf/turf";
 import type { MultiPolygon, Polygon } from "geojson";
 import type { Place } from "@/lib/types";
@@ -31,8 +31,15 @@ function wikipediaUrl(tag: string | undefined) {
   return `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title.replaceAll(" ", "_"))}`;
 }
 
+// 公立の館は展示の規模や常設の解説が期待できる
+const HALL_RANK: [RegExp, number, string][] = [
+  [/^国立|国立.*(博物館|美術館)/, 3, "国立"],
+  [/^(県立|府立|都立|道立)|[都道府県]立/, 2, "公立"],
+];
+
 function kindOf(tags: Record<string, string>): Place["kind"] | null {
   if (tags.amenity === "place_of_worship" && tags.religion === "shinto") return "shrine";
+  if (tags.tourism === "gallery" || (tags.tourism === "museum" && (tags.museum === "art" || /美術館/.test(tags.name ?? "")))) return "art";
   if (tags.tourism === "museum") return "museum";
   if (tags.tourism === "information" && (tags.information === "office" || tags.information === "visitor_centre")) return "info";
   return null;
@@ -70,6 +77,15 @@ export function rankPlaces(elements: OsmElement[], towns: Town[]) {
         score += 3;
         reasons.push("式内社");
       }
+    } else if (kind === "museum" || kind === "art") {
+      for (const [re, pts, label] of HALL_RANK) {
+        if (re.test(name)) {
+          score += pts;
+          reasons.push(label);
+          break;
+        }
+      }
+      if (/博物館|美術館|ミュージアム/.test(name)) score += 1;
     }
     if (tags.wikipedia) {
       score += 3;
@@ -98,11 +114,14 @@ export function rankPlaces(elements: OsmElement[], towns: Town[]) {
 
   const byScore = (a: Place, b: Place) => b.score - a.score || a.name.localeCompare(b.name, "ja");
   const shrines = places.filter((p) => p.kind === "shrine").sort(byScore);
-  const primers = places.filter((p) => p.kind !== "shrine").sort(byScore);
+  // 予習先は資料館・博物館と案内所。美術館は目的地として別に出す
+  const primers = places.filter((p) => p.kind === "museum" || p.kind === "info").sort(byScore);
+  const halls = places.filter((p) => p.kind === "museum" || p.kind === "art").sort(byScore);
   return {
     // 由緒の手がかりがある社を優先し、なければ名前のある社を少しだけ出す
     anchors: shrines.filter((s) => s.score > 0).slice(0, 12).concat(shrines.filter((s) => s.score === 0).slice(0, 3)),
     primers: primers.slice(0, 20),
+    halls: halls.slice(0, 12),
     shrineCount: shrines.length,
   };
 }

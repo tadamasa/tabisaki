@@ -1,13 +1,15 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { MAPS_WAYPOINT_MAX, type Plan, type Role, type Stop, clock, googleMapsRoute } from "@/lib/plan/itinerary";
 import type { Place } from "@/lib/types";
 
-const ROLE_LABEL: Record<Role, string> = { primer: "予習", anchor: "本命", kin: "ゆかり" };
+const ROLE_LABEL: Record<Role, string> = { primer: "予習", anchor: "本命", kin: "ゆかり", extra: "立ち寄り" };
 const ROLE_CLASS: Record<Role, string> = {
   primer: "bg-museum/10 text-museum",
   anchor: "bg-shrine text-white",
   kin: "bg-shrine/10 text-shrine",
+  extra: "bg-art/10 text-art",
 };
 const START_TIMES = [6, 7, 8, 9, 10].map((h) => h * 60);
 
@@ -17,7 +19,8 @@ type Props = {
   onChange: (stops: Stop[]) => void;
   onStart: (min: number) => void;
   onReset: () => void;
-  onOptimize: () => void;
+  // 並べ直して順番が変わったら true
+  onOptimize: () => boolean;
   onFocus: (p: Place) => void;
 };
 
@@ -33,14 +36,21 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
     onChange(next);
   };
   const remove = (i: number) => onChange(stops.filter((_, k) => k !== i));
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
+  const optimize = () => setNotice(onOptimize() ? "いちばん早く帰れる順に並べ直しました" : "すでにいちばん早く帰れる順です");
 
   return (
-    <section className="mt-4 rounded-lg border border-shrine/30 bg-shrine/5 p-3">
-      <div className="flex items-baseline justify-between gap-2">
+    <section className="rounded-lg border border-shrine/30 bg-shrine/5 p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-sm font-semibold">日帰りの行程（目安）</h3>
-        <span className="flex gap-3 text-xs">
+        <span className="flex gap-3 whitespace-nowrap text-xs">
           {stops.length > 1 && (
-            <button type="button" onClick={onOptimize} className="text-museum underline">
+            <button type="button" onClick={optimize} className="text-museum underline">
               近い順に並べ直す
             </button>
           )}
@@ -50,8 +60,14 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
         </span>
       </div>
 
+      {notice && (
+        <p role="status" className="mt-1 text-xs text-visited">
+          {notice}
+        </p>
+      )}
+
       {stops.length === 0 ? (
-        <p className="mt-2 text-sm text-muted">下の候補から「＋行程」で社や資料館を入れてください。</p>
+        <p className="mt-2 text-sm text-muted">「候補」から「＋行程」で社や館を入れてください。地図の印からも入れられます。</p>
       ) : (
         <ol className="mt-2 text-sm">
           <li className="flex items-center gap-2">
@@ -87,13 +103,13 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
                     <span className="ml-1 text-xs text-muted">{s.place.town}</span>
                   </span>
                   <span className="flex shrink-0 gap-0.5 text-muted">
-                    <button type="button" aria-label="前へ" disabled={i === 0} onClick={() => move(i, -1)} className="size-6 rounded hover:bg-background disabled:opacity-30">
+                    <button type="button" aria-label="前へ" disabled={i === 0} onClick={() => move(i, -1)} className="size-8 rounded hover:bg-background disabled:opacity-30">
                       ↑
                     </button>
-                    <button type="button" aria-label="後ろへ" disabled={i === stops.length - 1} onClick={() => move(i, 1)} className="size-6 rounded hover:bg-background disabled:opacity-30">
+                    <button type="button" aria-label="後ろへ" disabled={i === stops.length - 1} onClick={() => move(i, 1)} className="size-8 rounded hover:bg-background disabled:opacity-30">
                       ↓
                     </button>
-                    <button type="button" aria-label="外す" onClick={() => remove(i)} className="size-6 rounded hover:bg-background">
+                    <button type="button" aria-label="外す" onClick={() => remove(i)} className="size-8 rounded hover:bg-background">
                       ×
                     </button>
                   </span>

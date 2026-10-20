@@ -56,7 +56,7 @@ export type Atlas = {
 
 export type Place = {
   id: string;
-  kind: "shrine" | "museum" | "info";
+  kind: "shrine" | "museum" | "art" | "info";
   name: string;
   lat: number;
   lng: number;
@@ -71,6 +71,8 @@ export type AreaPlaces = {
   areaId: string;
   anchors: (Place & { primer: { place: Place; km: number } | null; en: En | null })[];
   primers: Place[];
+  // 本命にもできる博物館・美術館（資料館を含む）
+  halls: Place[];
   shrineCount: number;
   source: string;
 };
