@@ -16,6 +16,15 @@ export async function readBoundary(name: string) {
   return JSON.parse(await fs.readFile(file, "utf8"));
 }
 
+// スプレッドシートの読み出しは全インスタンスで共有するキャッシュに置き、Apps Script を叩く回数を抑える。
+// 地図データの組み立ては各インスタンスのメモリで足りる
+async function getVisits() {
+  "use cache: remote";
+  cacheLife("hours");
+  cacheTag(ATLAS_TAG);
+  return loadVisits();
+}
+
 export async function getAtlas(): Promise<Atlas> {
   "use cache";
   cacheLife("hours");
@@ -23,7 +32,7 @@ export async function getAtlas(): Promise<Atlas> {
 
   const [lat, lng] = (process.env.HOME_LATLNG ?? DEFAULT_HOME).split(",").map(Number);
   const [visits, detailed, display] = await Promise.all([
-    loadVisits(),
+    getVisits(),
     readBoundary("detailed"),
     readBoundary("display"),
   ]);
