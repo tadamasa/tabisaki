@@ -43,3 +43,13 @@ export type MuniProps = {
   km: number;
   area: string | null;
 };
+
+export type Atlas = {
+  summary: Summary;
+  areas: BlankArea[];
+  spots: Spot[];
+  municipalities: import("geojson").FeatureCollection<
+    import("geojson").Polygon | import("geojson").MultiPolygon,
+    MuniProps
+  >;
+};
