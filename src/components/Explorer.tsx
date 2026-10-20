@@ -2,7 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import type { Atlas } from "@/lib/types";
+import type { Atlas, Place } from "@/lib/types";
+import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
@@ -19,6 +20,16 @@ const DISTANCES = [
 const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
 
+async function fetchPlaces(areaId: string): Promise<NonNullable<PlacesState>> {
+  try {
+    const res = await fetch(`/api/areas/${encodeURIComponent(areaId)}/places`);
+    const body = await res.json();
+    return res.ok ? body : { error: body.error ?? `HTTP ${res.status}` };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 async function fetchAtlas(): Promise<Atlas> {
   const res = await fetch("/api/atlas", { cache: "no-store" });
   const body = await res.json();
@@ -32,6 +43,9 @@ export default function Explorer() {
   const [refreshing, setRefreshing] = useState(false);
   const [maxKm, setMaxKm] = useState(100);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 地帯ごとの神社・資料館の候補。開いたときに一度だけ取りに行く
+  const [places, setPlaces] = useState<Record<string, NonNullable<PlacesState>>>({});
+  const [focus, setFocus] = useState<Place | null>(null);
 
   const load = () => fetchAtlas().then(setData, (e: Error) => setError(e.message));
 
@@ -39,13 +53,25 @@ export default function Explorer() {
     fetchAtlas().then(setData, (e: Error) => setError(e.message));
   }, []);
 
+  const loadPlaces = (areaId: string) =>
+    fetchPlaces(areaId).then((r) => setPlaces((prev) => ({ ...prev, [areaId]: r })));
+
+  useEffect(() => {
+    if (selectedId && !places[selectedId]) loadPlaces(selectedId);
+    // places の変化では取り直さない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
   // 縁泉に記録を足したあと、スプレッドシートを読み直す
   const refresh = async () => {
     setRefreshing(true);
     try {
       await fetch("/api/atlas/refresh", { method: "POST" });
       setData(null);
+      setPlaces({});
       await load();
+      // 開いたままの地帯は、その場で候補を取り直す
+      if (selectedId) loadPlaces(selectedId);
     } finally {
       setRefreshing(false);
     }
@@ -56,6 +82,7 @@ export default function Explorer() {
     [data, maxKm],
   );
   const selected = data?.areas.find((a) => a.id === selectedId) ?? null;
+  const selectedPlaces = selectedId ? places[selectedId] : undefined;
 
   if (error) {
     return (
@@ -86,6 +113,8 @@ export default function Explorer() {
             atlas={data}
             maxKm={maxKm}
             selected={selected}
+            places={selectedPlaces && !("error" in selectedPlaces) ? selectedPlaces : null}
+            focus={focus}
             onSelectArea={setSelectedId}
           />
         ) : (
@@ -192,6 +221,18 @@ export default function Explorer() {
                           </li>
                         ))}
                       </ul>
+                      <AreaPlacesPanel
+                        state={selectedPlaces}
+                        onRetry={() => {
+                          setPlaces((prev) => {
+                            const next = { ...prev };
+                            delete next[a.id];
+                            return next;
+                          });
+                          loadPlaces(a.id);
+                        }}
+                        onFocus={setFocus}
+                      />
                       <p className="mt-3 text-sm">
                         <a
                           className="text-museum underline"
@@ -199,7 +240,7 @@ export default function Explorer() {
                           target="_blank"
                           rel="noreferrer"
                         >
-                          この地帯の神社をGoogleマップで見る
+                          ほかの神社もGoogleマップで見る
                         </a>
                       </p>
                     </div>

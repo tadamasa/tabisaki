@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   // 市区町村境界は実行時に読むので、サーバー関数に同梱する
   outputFileTracingIncludes: {
     "/api/atlas": ["./data/boundaries/**"],
+    "/api/areas/[id]/places": ["./data/boundaries/**"],
   },
   partialPrefetching: true,
   turbopack: {
