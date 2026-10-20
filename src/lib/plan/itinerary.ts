@@ -4,7 +4,8 @@ import type { AreaPlaces, Place } from "@/lib/types";
 
 export type Role = "primer" | "anchor" | "kin" | "extra";
 // linkNext: すぐ次の地点とつなぐ。つないだ2か所は、並べ直しても続けてこの順に回る
-export type Stop = { place: Place; role: Role; linkNext?: boolean };
+// before: この地点より後に回る地点の id。あいだに別の地点が入ってもよい
+export type Stop = { place: Place; role: Role; linkNext?: boolean; before?: string[] };
 export type TimedStop = Stop & { driveMin: number; arrive: number; depart: number; stayMin: number };
 export type Plan = { start: number; stops: TimedStop[]; returnMin: number; home: number; overMin: number };
 
@@ -124,13 +125,19 @@ export function blocksOf(stops: Stop[]): Stop[][] {
 
 // 予習先が本命より前にあることと、つないだ地点の並びを守って、帰りがいちばん早くなる順に並べ直す。
 // かたまりが8つまでなら全部の順番を試し、それより多いときは区間を裏返す改善（2-opt）で縮める。
-// つなぎ方のせいで「予習が本命より前」を守れないときは、今の順のままにする
+// 「A は B より前」の条件も守る。条件どうしがぶつかって守れないときは、今の順のままにする
 const EXACT_MAX = 8;
 
 const primerFirst = (o: Stop[]) => {
   const anchorAt = o.findIndex((s) => s.role === "anchor");
   return anchorAt < 0 || o.every((s, i) => s.role !== "primer" || i < anchorAt);
 };
+
+// 「A は B より前」の条件をすべて守れているか。行程にない地点の条件は無視する
+export function keepsOrder(o: Stop[]) {
+  const at = new Map(o.map((s, i) => [s.place.id, i]));
+  return o.every((s, i) => (s.before ?? []).every((id) => !at.has(id) || i < at.get(id)!));
+}
 
 function* permutations<T>(xs: T[]): Generator<T[]> {
   if (xs.length <= 1) {
@@ -147,7 +154,7 @@ export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 *
   if (blocks.length <= 1) return blocks.flat();
   const cost = (order: Stop[][]) => {
     const o = order.flat();
-    return primerFirst(o) ? schedule(o, home, start).home : Infinity;
+    return primerFirst(o) && keepsOrder(o) ? schedule(o, home, start).home : Infinity;
   };
   // 今の順で同点なら動かさない
   let best = blocks;

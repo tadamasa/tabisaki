@@ -43,8 +43,62 @@ function Drive({ min, link }: { min: number; link?: { on: boolean; toggle: () =>
   );
 }
 
+// 「〇〇より前に回る」の条件。守れていないときは赤で出す
+function OrderRules({
+  stop,
+  at,
+  others,
+  nameOf,
+  onChange,
+}: {
+  stop: Stop;
+  at: number;
+  others: Stop[];
+  nameOf: Map<string, { name: string; at: number }>;
+  onChange: (ids: string[]) => void;
+}) {
+  const before = (stop.before ?? []).filter((id) => nameOf.has(id));
+  const choices = others.filter((o) => !before.includes(o.place.id));
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
+      {before.map((id) => {
+        const ok = at < nameOf.get(id)!.at;
+        return (
+          <span key={id} className={`inline-flex items-center rounded-full border px-1.5 ${ok ? "border-area/50 text-area" : "border-shrine text-shrine"}`}>
+            {nameOf.get(id)!.name}より前{ok ? "" : "（今は守れていません）"}
+            <button
+              type="button"
+              aria-label={`${nameOf.get(id)!.name}より前、の条件を外す`}
+              onClick={() => onChange(before.filter((b) => b !== id))}
+              className="ml-0.5 min-h-6 px-1"
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
+      {choices.length > 0 && (
+        <select
+          value=""
+          onChange={(e) => e.target.value && onChange([...before, e.target.value])}
+          aria-label="順番の条件を足す"
+          className="max-w-[10rem] rounded border border-border bg-surface px-1 py-0.5 text-[11px] text-muted"
+        >
+          <option value="">＋より前に回る…</option>
+          {choices.map((o) => (
+            <option key={o.place.id} value={o.place.id}>
+              {o.place.name}より前
+            </option>
+          ))}
+        </select>
+      )}
+    </span>
+  );
+}
+
 export default function ItineraryPanel({ plan, home, onChange, onStart, onReset, onOptimize, onFocus }: Props) {
-  const stops: Stop[] = plan.stops.map(({ place, role, linkNext }) => ({ place, role, linkNext }));
+  const stops: Stop[] = plan.stops.map(({ place, role, linkNext, before }) => ({ place, role, linkNext, before }));
+  const nameOf = new Map(stops.map((s, i) => [s.place.id, { name: s.place.name, at: i }]));
   // つないだ地点はかたまりごと動かす
   const blocks = blocksOf(stops);
   const blockAt = (i: number) => {
@@ -60,6 +114,7 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
   // 外した地点の前の地点は、どこにもつながないようにする
   const remove = (i: number) =>
     onChange(stops.flatMap((s, k) => (k === i ? [] : k === i - 1 ? [{ ...s, linkNext: false }] : [s])));
+  const setBefore = (i: number, ids: string[]) => onChange(stops.map((s, k) => (k === i ? { ...s, before: ids } : s)));
   const toggleLink = (i: number) => onChange(stops.map((s, k) => (k === i ? { ...s, linkNext: !s.linkNext } : s)));
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
@@ -126,6 +181,13 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
                       {s.place.name}
                     </button>
                     <span className="ml-1 text-xs text-muted">{s.place.town}</span>
+                    <OrderRules
+                      stop={s}
+                      at={i}
+                      others={stops.filter((o) => o.place.id !== s.place.id)}
+                      nameOf={nameOf}
+                      onChange={(ids) => setBefore(i, ids)}
+                    />
                   </span>
                   <span className="flex shrink-0 gap-0.5 text-muted">
                     <button type="button" aria-label="前へ" disabled={blockAt(i) === 0} onClick={() => move(i, -1)} className="size-8 rounded hover:bg-background disabled:opacity-30">
@@ -158,7 +220,7 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onReset,
           {stops.length > MAPS_WAYPOINT_MAX && (
             <span className="text-shrine">Googleマップには最初の{MAPS_WAYPOINT_MAX}か所までしか渡せません。</span>
           )}
-          <span className="text-muted">時刻は直線距離からの目安です。地点のあいだの「🔗 つなぐ」を押すと、その2か所は並べ直しても続けてこの順に回ります。</span>
+          <span className="text-muted">時刻は直線距離からの目安です。地点のあいだの「🔗 つなぐ」を押すと、その2か所は並べ直しても続けてこの順に回ります。「＋より前に回る」では、あいだに別の場所が入ってもよい前後だけを決められます。</span>
         </p>
       )}
     </section>

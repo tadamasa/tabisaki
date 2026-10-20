@@ -23,8 +23,8 @@ const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query
 const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
 
 // 編集した行程は、この端末のブラウザに地帯ごとに覚えておく
-// 3つ目が 1 の地点は、すぐ次の地点とつないである
-type SavedPlan = { stops: [string, Role, 1?][]; start: number };
+// 3つ目が 1 の地点は、すぐ次の地点とつないである。4つ目は、この地点より後に回る地点の id
+type SavedPlan = { stops: [string, Role, (0 | 1)?, string[]?][]; start: number };
 const PLANS_KEY = "tabisaki:plans";
 const DEFAULT_START = 8 * 60;
 
@@ -129,9 +129,9 @@ export default function Explorer() {
   const stops: Stop[] = !loaded
     ? []
     : saved
-      ? saved.stops.flatMap(([id, role, link]) => {
+      ? saved.stops.flatMap(([id, role, link, before]) => {
           const place = AREA_PLACE(loaded).get(id);
-          return place ? [{ place, role, linkNext: link === 1 }] : [];
+          return place ? [{ place, role, linkNext: link === 1, before }] : [];
         })
       : suggestPlan(loaded, home, undefined, start);
   const plan = loaded ? schedule(stops, home, start) : null;
@@ -140,7 +140,11 @@ export default function Explorer() {
     if (!loaded) return;
     setPlans((prev) => {
       const all = { ...prev };
-      if (next) all[loaded.areaId] = { stops: next.map((s) => (s.linkNext ? [s.place.id, s.role, 1] : [s.place.id, s.role])), start: nextStart };
+      if (next) all[loaded.areaId] = { stops: next.map((s) => (s.before?.length
+              ? [s.place.id, s.role, s.linkNext ? 1 : 0, s.before]
+              : s.linkNext
+                ? [s.place.id, s.role, 1]
+                : [s.place.id, s.role])), start: nextStart };
       else delete all[loaded.areaId];
       writePlans(all);
       return all;

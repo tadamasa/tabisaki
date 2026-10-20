@@ -130,3 +130,21 @@ test("かたまりの最後はどこにもつながない", () => {
   assert.equal(blocks.length, 1);
   assert.ok(!blocks[0][1].linkNext);
 });
+
+test("「A は B より前」は、あいだに別の地点が入っても守る", () => {
+  const line = [1, 2, 3].map((k) => place(`社${k}`, "shrine", 135.87 + 0.03 * k, 34.37 - 0.03 * k));
+  const stops = [
+    { place: museum, role: "primer" as const },
+    { place: main, role: "anchor" as const },
+    { place: line[0], role: "kin" as const },
+    { place: line[1], role: "kin" as const },
+    // いちばん遠い社3を、社1より前に回る
+    { place: line[2], role: "kin" as const, before: ["社1"] },
+  ];
+  const ids = optimizeOrder(stops, home).map((s) => s.place.id);
+  assert.ok(ids.indexOf("社3") < ids.indexOf("社1"), ids.join(","));
+  assert.ok(ids.indexOf("資料館") < ids.indexOf("本命"), ids.join(","));
+  // 条件がなければ社1が先に来る
+  const free = optimizeOrder(stops.map((s) => ({ ...s, before: [] })), home).map((s) => s.place.id);
+  assert.ok(free.indexOf("社1") < free.indexOf("社3"), free.join(","));
+});
