@@ -6,6 +6,7 @@ import { ATLAS_TAG, getAtlas, readBoundary } from "@/lib/atlas";
 import { townArea } from "@/lib/townArea";
 import { type VisitedShrine, findDeityKin, findEn, findLineage } from "./en";
 import { type OsmElement, type Town, pairPrimer, rankPlaces } from "./rank";
+import { shakakuBasis } from "./shakaku";
 import { fetchWikiShrines, isNear, titleCandidates } from "./wiki";
 
 // OVERPASS_URL はカンマ区切りで複数指定できる。先頭から少しずつ時間をずらして問い合わせ、最初に返った結果を使う
@@ -70,10 +71,13 @@ async function getOsm(bbox: number[]) {
   return fetchOverpass(bbox);
 }
 
-// 記事の祭神も同じく、記録の読み直しでは捨てない
-async function getWikiShrines(titles: string[]) {
+// 記事の祭神・社格も同じく、記録の読み直しでは捨てない。
+// 記事から読む項目を増やしたら WIKI_VERSION を上げて、古い覚えを使わないようにする
+const WIKI_VERSION = 2;
+async function getWikiShrines(version: number, titles: string[]) {
   "use cache: remote";
   cacheLife("weeks");
+  void version; // 覚えの鍵にだけ使う
   return [...(await fetchWikiShrines(titles)).entries()];
 }
 
@@ -86,7 +90,7 @@ async function getVisitedDeities(): Promise<VisitedShrine[]> {
   const atlas = await getAtlas();
   const shrines = new Map<string, (typeof atlas.spots)[number]>();
   for (const s of atlas.spots) if (s.cat === "shrine") shrines.set(`${s.muni}:${s.name}`, s);
-  const pages = new Map(await getWikiShrines([...shrines.values()].flatMap((s) => titleCandidates(s.name)).sort()));
+  const pages = new Map(await getWikiShrines(WIKI_VERSION, [...shrines.values()].flatMap((s) => titleCandidates(s.name)).sort()));
   const result: VisitedShrine[] = [];
   for (const s of shrines.values()) {
     const page = titleCandidates(s.name).map((t) => pages.get(t)).find((p) => p && isNear(p, s.lat, s.lng));
@@ -161,18 +165,33 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
   const anchorTitles = (a: (typeof ranked.anchors)[number]) => [wikiTitle(a.wikipedia), a.name].filter((t): t is string => !!t);
   const [visitedDeities, anchorPages] = await Promise.all([
     safely(getVisitedDeities(), []),
-    safely(getWikiShrines(ranked.anchors.flatMap(anchorTitles).sort()), []).then((e) => new Map(e)),
+    safely(getWikiShrines(WIKI_VERSION, ranked.anchors.flatMap(anchorTitles).sort()), []).then((e) => new Map(e)),
   ]);
-  const deitiesOf = (a: (typeof ranked.anchors)[number]) =>
-    anchorTitles(a).map((t) => anchorPages.get(t)).find((p) => p && isNear(p, a.lat, a.lng))?.deities ?? [];
+  const pageOf = (a: (typeof ranked.anchors)[number]) =>
+    anchorTitles(a).map((t) => anchorPages.get(t)).find((p) => p && isNear(p, a.lat, a.lng));
+  const deitiesOf = (a: (typeof ranked.anchors)[number]) => pageOf(a)?.deities ?? [];
+
+  // 記事の社格を点数に足して並べ直す（名前などですでに数えたものは重ねない）。隣の町の社は後ろのまま
+  const anchors = ranked.anchors
+    .map((a) => {
+      const shakaku = pageOf(a)?.shakaku ?? [];
+      const extra = shakakuBasis(shakaku, new Set(a.basis?.map((b) => b.key)));
+      return {
+        ...a,
+        shakaku,
+        basis: [...(a.basis ?? []), ...extra],
+        score: a.score + extra.reduce((s, b) => s + b.pts, 0),
+      };
+    })
+    .sort((a, b) => Number(!!a.outside) - Number(!!b.outside) || b.score - a.score);
 
   return {
     areaId,
-    anchors: ranked.anchors.map((a) => ({
+    anchors: anchors.map((a) => ({
       ...a,
       primer: pairPrimer(a, ranked.primers),
       en: findEn(
-        findLineage(a, visitedShrines, ranked.anchors, townOf),
+        findLineage(a, visitedShrines, anchors, townOf),
         findDeityKin(a.name, deitiesOf(a), visitedDeities, townOf),
       ),
     })),

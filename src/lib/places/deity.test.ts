@@ -11,6 +11,8 @@ test("基礎情報の主祭神欄から神名を取り出す", () => {
   assert.deepEqual(parseDeities(wt), ["丹生都比売大神", "高野御子大神", "大食都比売大神"]);
   assert.deepEqual(parseDeities("|祭神 = [[誉田別命|応神天皇]]、[[神功皇后]]"), ["応神天皇", "神功皇后"]);
   assert.deepEqual(parseDeities("|社格 = 村社"), []);
+  // 空の欄で次の行を拾わない
+  assert.deepEqual(parseDeities("|主祭神 =\n|社格 = 村社"), []);
 });
 
 test("別名と語尾の違いをそろえる", () => {

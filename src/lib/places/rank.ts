@@ -2,6 +2,7 @@
 import * as turf from "@turf/turf";
 import type { MultiPolygon, Polygon } from "geojson";
 import type { Place } from "@/lib/types";
+import type { Basis } from "./shakaku";
 
 export type OsmElement = {
   type: "node" | "way" | "relation";
@@ -19,12 +20,13 @@ export type Town = { id: string; name: string; geometry: Polygon | MultiPolygon;
 export type VisitedHere = (townId: string, name: string, lat: number, lng: number) => boolean;
 
 // 名前や社格から読み取れる「由緒の深さ」の手がかり
-const SHRINE_RANK: [RegExp, number, string][] = [
-  [/一宮|一之宮|一の宮/, 4, "一宮"],
-  [/大社$/, 3, "大社"],
-  [/神宮$/, 3, "神宮"],
-  [/総社|惣社/, 2, "総社"],
-  [/八幡宮$|天満宮$/, 1, ""],
+// [手がかり, 点, 理由に出す言葉, 社格の key（Wikipedia の社格と重ねて数えないため）]
+const SHRINE_RANK: [RegExp, number, string, string][] = [
+  [/一宮|一之宮|一の宮/, 4, "一宮", "一宮"],
+  [/大社$/, 3, "大社", "名:大社"],
+  [/神宮$/, 3, "神宮", "名:神宮"],
+  [/総社|惣社/, 2, "総社", "総社"],
+  [/八幡宮$|天満宮$/, 1, "", "名:宮"],
 ];
 
 function wikipediaUrl(tag: string | undefined) {
@@ -72,18 +74,22 @@ export function rankPlaces(elements: OsmElement[], towns: Town[], visitedHere: V
     seen.add(key);
 
     const reasons: string[] = [];
+    // 社の点数の内訳（画面で「並び順の根拠」として出す）
+    const basis: Basis[] = [];
     let score = 0;
     if (kind === "shrine") {
-      for (const [re, pts, label] of SHRINE_RANK) {
+      for (const [re, pts, label, key] of SHRINE_RANK) {
         if (re.test(name)) {
           score += pts;
           if (label) reasons.push(label);
+          basis.push({ key, label: label ? `名前に「${label}」` : "名前が八幡宮・天満宮", pts });
           break;
         }
       }
       if (/式内/.test(tags.description ?? "") || tags["shrine:shikinai"]) {
         score += 3;
         reasons.push("式内社");
+        basis.push({ key: "式内社", label: "式内社", pts: 3 });
       }
     } else if (kind === "museum" || kind === "art") {
       for (const [re, pts, label] of HALL_RANK) {
@@ -107,12 +113,15 @@ export function rankPlaces(elements: OsmElement[], towns: Town[], visitedHere: V
     if (tags.wikipedia) {
       score += 3;
       reasons.push("Wikipediaに記事あり");
+      basis.push({ key: "記事", label: "Wikipediaに記事あり", pts: 3 });
     } else if (tags.wikidata) {
       score += 1;
+      basis.push({ key: "記事", label: "Wikidataに登録あり", pts: 1 });
     }
     if (tags.heritage) {
       score += 1;
       reasons.push("文化財");
+      basis.push({ key: "文化財", label: "文化財", pts: 1 });
     }
 
     if (town.outside) reasons.push("行ったことのある町");
@@ -125,6 +134,7 @@ export function rankPlaces(elements: OsmElement[], towns: Town[], visitedHere: V
       town: town.name,
       score,
       reasons,
+      ...(kind === "shrine" ? { basis } : {}),
       wikipedia: wikipediaUrl(tags.wikipedia),
       website: tags.website ?? tags["contact:website"] ?? null,
       ...(town.outside ? { outside: true } : {}),

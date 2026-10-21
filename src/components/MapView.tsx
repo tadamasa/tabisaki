@@ -447,6 +447,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
       const info = document.createElement("div");
       info.innerHTML =
         `<strong>${escapeHtml(p.name)}</strong><br>${PLACE_LABEL[p.kind]} ・ ${escapeHtml(p.town)}` +
+        (p.shakaku?.length ? `<br>社格: ${p.shakaku.map(escapeHtml).join("・")}` : "") +
         (p.reasons.length ? `<br>${p.reasons.map(escapeHtml).join("・")}` : "") +
         (p.wikipedia ? `<br><a href="${escapeHtml(p.wikipedia)}" target="_blank" rel="noreferrer">Wikipedia</a>` : "") +
         (p.kind === "lodging" ? `<br><a href="${escapeHtml(innSearchLink(p))}" target="_blank" rel="noreferrer">空室・料金を調べる</a>` : "") +

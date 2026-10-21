@@ -1,12 +1,13 @@
 import "server-only";
 import * as turf from "@turf/turf";
 import { parseDeities } from "./deity";
+import { parseShakaku } from "./shakaku";
 
-// ja.wikipedia の記事から、座標と祭神を一度に50件まで引く
+// ja.wikipedia の記事から、座標と祭神・社格を一度に50件まで引く
 const API = process.env.WIKIPEDIA_API ?? "https://ja.wikipedia.org/w/api.php";
 const UA = "tabisaki/0.1 (personal trip planner)";
 
-export type WikiShrine = { title: string; lat: number; lng: number; deities: string[] };
+export type WikiShrine = { title: string; lat: number; lng: number; deities: string[]; shakaku: string[] };
 
 type ApiPage = {
   title: string;
@@ -19,7 +20,7 @@ type ApiResponse = {
   query?: { pages?: ApiPage[]; redirects?: { from: string; to: string }[]; normalized?: { from: string; to: string }[] };
 };
 
-// 引いた名前 → 記事（曖昧さ回避や祭神欄のない記事は除く）
+// 引いた名前 → 記事（曖昧さ回避や、祭神欄も社格欄もない記事は除く）
 export async function fetchWikiShrines(titles: string[]): Promise<Map<string, WikiShrine>> {
   const unique = [...new Set(titles)];
   const batches: string[][] = [];
@@ -54,9 +55,11 @@ async function fetchBatch(batch: string[]): Promise<Map<string, WikiShrine>> {
   const byTitle = new Map<string, WikiShrine>();
   for (const p of q.pages ?? []) {
     if (p.missing || p.pageprops?.disambiguation !== undefined || !p.coordinates?.length) continue;
-    const deities = parseDeities(p.revisions?.[0]?.slots.main.content ?? "");
-    if (deities.length === 0) continue;
-    byTitle.set(p.title, { title: p.title, lat: p.coordinates[0].lat, lng: p.coordinates[0].lon, deities });
+    const text = p.revisions?.[0]?.slots.main.content ?? "";
+    const deities = parseDeities(text);
+    const shakaku = parseShakaku(text);
+    if (deities.length === 0 && shakaku.length === 0) continue;
+    byTitle.set(p.title, { title: p.title, lat: p.coordinates[0].lat, lng: p.coordinates[0].lon, deities, shakaku });
   }
   // 引いた名前から、正規化・転送をたどって記事に結ぶ
   const hop = new Map([...(q.normalized ?? []), ...(q.redirects ?? [])].map((r) => [r.from, r.to]));

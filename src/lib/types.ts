@@ -67,6 +67,9 @@ export type Place = {
   website: string | null;
   // 空白地帯の外、隣の「行ったことのある町」にある場所
   outside?: boolean;
+  // 社: 並び順の点数の内訳と、Wikipedia の基礎情報にある社格
+  basis?: { key: string; label: string; pts: number }[];
+  shakaku?: string[];
 };
 
 export type AreaPlaces = {
