@@ -1,5 +1,6 @@
 "use client";
 
+import { TOWN_AREA_PREFIX } from "@/lib/townArea";
 import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
@@ -160,7 +161,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
     <div className="mt-4 space-y-4">
       <section>
         <h3 className="text-xs font-semibold tracking-wide text-muted">
-          神社（地帯の {shrineCount} 社から）
+          神社（{state.areaId.startsWith(TOWN_AREA_PREFIX) ? "この町" : "地帯"}の {shrineCount} 社から）
         </h3>
         {anchors.length === 0 ? (
           <p className="mt-1 text-sm text-muted">名前のわかる神社が見つかりませんでした。</p>

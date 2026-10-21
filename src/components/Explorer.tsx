@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_START2, type Role, type Stop, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { townArea } from "@/lib/townArea";
 import type { AreaPlaces, Atlas, Place } from "@/lib/types";
 import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
 import ItineraryPanel from "./ItineraryPanel";
@@ -151,7 +152,8 @@ export default function Explorer() {
     () => (data?.areas ?? []).filter((a) => a.km < maxKm),
     [data, maxKm],
   );
-  const selected = data?.areas.find((a) => a.id === selectedId) ?? null;
+  // 地図の町名から、地帯に入っていない町を1つだけ開くこともある
+  const selected = data && selectedId ? (data.areas.find((a) => a.id === selectedId) ?? townArea(data, selectedId)) : null;
   const selectedPlaces = selectedId ? places[selectedId] : undefined;
   const home = data?.summary.home ?? ([135.5157, 34.7617] as [number, number]);
   const loaded = selectedPlaces && !("error" in selectedPlaces) ? selectedPlaces : null;
@@ -338,7 +340,9 @@ export default function Explorer() {
                   </p>
                 </>
               )}
-              <h3 className="mt-6 text-xs font-semibold tracking-wide text-muted">この地帯のまだ行っていない町</h3>
+              <h3 className="mt-6 text-xs font-semibold tracking-wide text-muted">
+                {data?.areas.some((a) => a.id === selected.id) ? "この地帯のまだ行っていない町" : "この町"}
+              </h3>
               <ul className="mt-1.5 flex flex-wrap gap-1.5">
                 {selected.towns.map((t) => (
                   <li key={t.id}>

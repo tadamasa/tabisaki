@@ -3,6 +3,7 @@ import * as turf from "@turf/turf";
 import { cacheLife, cacheTag } from "next/cache";
 import type { AreaPlaces, Spot } from "@/lib/types";
 import { ATLAS_TAG, getAtlas, readBoundary } from "@/lib/atlas";
+import { townArea } from "@/lib/townArea";
 import { type VisitedShrine, findDeityKin, findEn, findLineage } from "./en";
 import { type OsmElement, type Town, pairPrimer, rankPlaces } from "./rank";
 import { fetchWikiShrines, isNear, titleCandidates } from "./wiki";
@@ -115,13 +116,15 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
   cacheTag(ATLAS_TAG);
 
   const atlas = await getAtlas();
-  const area = atlas.areas.find((a) => a.id === areaId);
+  // 地帯のほか、地図の町名から開いた1つの町（town-<コード>）も扱う
+  const single = townArea(atlas, areaId);
+  const area = single ?? atlas.areas.find((a) => a.id === areaId);
   if (!area) return null;
 
-  // 地帯の町に加えて、隣り合う「行ったことのある町」も探す（まだ行っていない場所だけを出す）
+  // 地帯の町に加えて、隣り合う「行ったことのある町」も探す（まだ行っていない場所だけを出す）。1つの町を開いたときは隣は探さない
   const inArea = new Set(area.towns.map((t) => t.id));
   const muni = new Map(atlas.municipalities.features.map((f) => [f.properties.id, f.properties]));
-  const { edges } = (await readBoundary("edges")) as { edges: [string, string, number][] };
+  const { edges } = single ? { edges: [] } : ((await readBoundary("edges")) as { edges: [string, string, number][] });
   const neighbors = new Set<string>();
   for (const [a, b] of edges) {
     if (inArea.has(a) && !inArea.has(b) && muni.get(b)?.visited) neighbors.add(b);
@@ -135,13 +138,15 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
     const id = f.properties.N03_007;
     if (!f.geometry || !(inArea.has(id) || neighbors.has(id))) continue;
     const name = area.towns.find((t) => t.id === id)?.name ?? muni.get(id)?.short ?? id;
-    towns.push({ id, name, geometry: f.geometry, outside: neighbors.has(id) });
+    // 行ったことのある町では、記録のある場所を除く（開いた町そのものが行ったことのある町のときも）
+    towns.push({ id, name, geometry: f.geometry, outside: neighbors.has(id), visited: !!muni.get(id)?.visited });
   }
   const bbox = round(turf.bbox(turf.featureCollection(towns.map((t) => turf.feature(t.geometry)))));
 
   // 行ったことのある町では、記録のある場所（近くにある、または同じ名前）を除く
   const spotsByMuni = new Map<string, Spot[]>();
-  for (const s of atlas.spots) if (s.muni && neighbors.has(s.muni)) spotsByMuni.set(s.muni, [...(spotsByMuni.get(s.muni) ?? []), s]);
+  const visitedTowns = new Set(towns.filter((t) => t.visited).map((t) => t.id));
+  for (const s of atlas.spots) if (s.muni && visitedTowns.has(s.muni)) spotsByMuni.set(s.muni, [...(spotsByMuni.get(s.muni) ?? []), s]);
   const bare = (n: string) => n.replace(/\s*[（(].*?[)）]\s*/g, "").trim();
   const visitedHere = (townId: string, name: string, lat: number, lng: number) =>
     (spotsByMuni.get(townId) ?? []).some(

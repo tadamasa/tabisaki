@@ -12,8 +12,8 @@ export type OsmElement = {
   tags?: Record<string, string>;
 };
 
-// outside: 空白地帯の外にある、隣の行ったことのある町
-export type Town = { id: string; name: string; geometry: Polygon | MultiPolygon; outside?: boolean };
+// outside: 空白地帯の外にある、隣の行ったことのある町。visited: 行ったことのある町（記録のある場所を除く）
+export type Town = { id: string; name: string; geometry: Polygon | MultiPolygon; outside?: boolean; visited?: boolean };
 
 // 行ったことのある町で、すでに記録のある場所かどうか
 export type VisitedHere = (townId: string, name: string, lat: number, lng: number) => boolean;
@@ -66,7 +66,7 @@ export function rankPlaces(elements: OsmElement[], towns: Town[], visitedHere: V
     const town = towns.find((t) => turf.booleanPointInPolygon(pt, t.geometry));
     if (!town) continue;
     // 宿は泊まったことがあっても候補にしてよい
-    if (town.outside && kind !== "lodging" && visitedHere(town.id, name, lat, lng)) continue;
+    if ((town.outside || town.visited) && kind !== "lodging" && visitedHere(town.id, name, lat, lng)) continue;
     const key = `${kind}:${name}:${town.id}`;
     if (seen.has(key)) continue;
     seen.add(key);

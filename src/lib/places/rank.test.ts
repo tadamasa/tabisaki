@@ -98,3 +98,12 @@ test("隣の行ったことのある町では、記録のない場所だけを�
   assert.deepEqual(r.lodgings.map((l) => l.name), ["吉野温泉 元湯", "駅前ホテル"]);
   assert.ok(r.lodgings[0].reasons.includes("旅館・温泉宿"));
 });
+
+test("行ったことのある町を1つだけ開いたときも、記録のある場所は除き、ほかはふつうに並べる", () => {
+  const one: Town[] = [{ ...towns[0], visited: true }];
+  const visited = (_: string, name: string) => name === "吉野水分神社";
+  const r = rankPlaces(elements, one, visited);
+  assert.deepEqual(r.anchors.map((a) => a.name), ["八幡神社"]);
+  assert.ok(!r.anchors[0].outside);
+  assert.equal(r.shrineCount, 1);
+});
