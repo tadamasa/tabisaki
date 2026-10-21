@@ -67,14 +67,22 @@ const mapLinks = (lng: number, lat: number, query: string) =>
   `<br><a href="https://maps.gsi.go.jp/#15/${lat.toFixed(5)}/${lng.toFixed(5)}/" target="_blank" rel="noreferrer">地理院地図</a>` +
   ` ・ <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}" target="_blank" rel="noreferrer">Googleマップ</a>`;
 
-function label(text: string, kind: "town" | "spot") {
-  const el = document.createElement("div");
+function label(text: string, kind: "town" | "visited-town" | "spot") {
+  const el = document.createElement(kind === "spot" ? "div" : "button");
   el.className =
     kind === "town"
-      ? "pointer-events-none rounded bg-surface px-1.5 text-xs font-medium text-foreground shadow ring-1 ring-border"
-      : "pointer-events-none whitespace-nowrap rounded bg-surface/90 px-1 text-[11px] text-foreground ring-1 ring-border";
+      ? "cursor-pointer rounded bg-surface px-1.5 text-xs font-medium text-foreground shadow ring-1 ring-border hover:ring-area"
+      : kind === "visited-town"
+        ? "cursor-pointer rounded bg-surface/80 px-1.5 text-[11px] text-muted ring-1 ring-visited/50 hover:ring-visited"
+        : "pointer-events-none whitespace-nowrap rounded bg-surface/90 px-1 text-[11px] text-foreground ring-1 ring-border";
   el.textContent = text;
   return el;
+}
+
+// 市町村の吹き出しの中身
+function muniHtml(p: MuniProps, [lng, lat]: [number, number]) {
+  const status = p.visited ? `訪問 ${p.visits} 件 ・ 最後 ${formatDate(p.last)}` : "まだ記録がありません";
+  return `<strong>${escapeHtml(p.name)}</strong><br>${status}<br>自宅から約 ${p.km} km${mapLinks(lng, lat, p.name)}`;
 }
 
 function bboxOf(g: import("geojson").Polygon | import("geojson").MultiPolygon) {
@@ -282,9 +290,12 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
       }
     };
     map.on("moveend", updateSpotLabels);
+    // 寄っていくと、行ったことのある町の名前は隠して社の名前に場所を譲る（まだの町の名前は残す）
     map.on("moveend", () => {
       const hide = map.getZoom() >= TOWN_LABEL_MAX_ZOOM;
-      townLabelsRef.current.forEach((m) => (m.getElement().style.visibility = hide ? "hidden" : "visible"));
+      townLabelsRef.current.forEach((m) => {
+        if (m.getElement().dataset.visited) m.getElement().style.visibility = hide ? "hidden" : "visible";
+      });
     });
 
     map.on("click", "spots", (e) => {
@@ -302,24 +313,16 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
       e.preventDefault();
     });
 
+    // 町の面を押したら、その町を含む地帯を開くだけにする。町の吹き出しは町の名前を押したときに出す
     map.on("click", (e) => {
-      // 印（マーカー）を押したときは、その吹き出しだけを出す
       if (e.defaultPrevented || (e.originalEvent.target as HTMLElement).closest(".maplibregl-marker")) return;
-      const f = map.queryRenderedFeatures(e.point, { layers: ["muni-line", "muni-visited", "muni-area"] })[0];
+      const f = map.queryRenderedFeatures(e.point, { layers: ["muni-area"] })[0];
       if (!f) return;
-      const p = f.properties as unknown as MuniProps;
-      const area = p.area && p.area !== "null" ? p.area : null;
-      const status = p.visited
-        ? `訪問 ${p.visits} 件 ・ 最後 ${formatDate(p.last)}`
-        : "まだ記録がありません";
-      new maplibregl.Popup()
-        .setLngLat(e.lngLat)
-        .setHTML(`<strong>${escapeHtml(p.name)}</strong><br>${status}<br>自宅から約 ${p.km} km${mapLinks(e.lngLat.lng, e.lngLat.lat, p.name)}`)
-        .addTo(map);
-      if (area) onSelectRef.current(area);
+      const area = (f.properties as unknown as MuniProps).area;
+      if (area && area !== "null") onSelectRef.current(area);
     });
 
-    for (const layer of ["spots", "muni-visited", "muni-area"]) {
+    for (const layer of ["spots", "muni-area"]) {
       map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
     }
@@ -359,13 +362,30 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         const centers = new Map(
           atlas.municipalities.features.map((f) => [f.properties.id, f] as const),
         );
-        for (const t of selected.towns) {
-          const f = centers.get(t.id);
-          if (!f) continue;
+        // 地帯の町と、そのまわりの行ったことのある町に名前を出す。名前を押すと町の吹き出しが出る
+        // 地帯の枠を少し広げた範囲に中心がある町を「まわり」とみなす
+        const PAD = 0.05;
+        const [ax0, ay0, ax1, ay1] = [selected.bbox[0] - PAD, selected.bbox[1] - PAD, selected.bbox[2] + PAD, selected.bbox[3] + PAD];
+        const nearby = atlas.municipalities.features.filter((f) => {
+          if (!f.properties.visited) return false;
           const [x0, y0, x1, y1] = bboxOf(f.geometry);
+          const [cx, cy] = [(x0 + x1) / 2, (y0 + y1) / 2];
+          return cx >= ax0 && cx <= ax1 && cy >= ay0 && cy <= ay1;
+        });
+        const towns = [
+          ...selected.towns.flatMap((t) => (centers.get(t.id) ? [{ f: centers.get(t.id)!, name: t.name }] : [])),
+          ...nearby.map((f) => ({ f, name: f.properties.short })),
+        ];
+        for (const { f, name } of towns) {
+          const [x0, y0, x1, y1] = bboxOf(f.geometry);
+          const at: [number, number] = [(x0 + x1) / 2, (y0 + y1) / 2];
+          const el = label(name, f.properties.visited ? "visited-town" : "town");
+          if (f.properties.visited) el.dataset.visited = "1";
+          el.setAttribute("aria-label", `${f.properties.name}の情報`);
           townLabelsRef.current.push(
-            new maplibregl.Marker({ element: label(t.name, "town") })
-              .setLngLat([(x0 + x1) / 2, (y0 + y1) / 2])
+            new maplibregl.Marker({ element: el })
+              .setLngLat(at)
+              .setPopup(new maplibregl.Popup({ offset: 14 }).setHTML(muniHtml(f.properties, at)))
               .addTo(map),
           );
         }
