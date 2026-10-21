@@ -12,6 +12,7 @@
   --museum: #3b6fb6;
   --art: #7b4fa0;
   --castle: #7a5a2e;
+  --inn: #3f7a46;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,6 +37,7 @@
   --color-museum: var(--museum);
   --color-art: var(--art);
   --color-castle: var(--castle);
+  --color-inn: var(--inn);
   --font-sans: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
 }
 

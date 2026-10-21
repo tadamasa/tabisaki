@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AreaPlaces, Place } from "@/lib/types";
-import { DAY_END, blocksOf, driveMinutes, googleMapsRoute, insertKin, optimizeOrder, roleFor, schedule, suggestPlan } from "./itinerary";
+import { DAY_END, INN_BY, blocksOf, driveMinutes, googleMapsRoutes, insertKin, optimizeOrder, roleFor, schedule, suggestPlan } from "./itinerary";
 
 const home: [number, number] = [135.5157, 34.7617];
 const place = (id: string, kind: Place["kind"], lng: number, lat: number, score = 0): Place => ({
@@ -23,6 +23,7 @@ const areaPlaces: AreaPlaces = {
   primers: [museum],
   halls: [museum],
   castles: [],
+  lodgings: [],
   shrineCount: 4,
   source: "test",
 };
@@ -72,7 +73,7 @@ test("足した場所の役目は、種類と本命から決める", () => {
 });
 
 test("Google マップの経路は自宅発着で立ち寄りを順に並べる", () => {
-  const url = new URL(googleMapsRoute([{ place: museum, role: "primer" }, { place: main, role: "anchor" }], home));
+  const url = new URL(googleMapsRoutes([{ place: museum, role: "primer" }, { place: main, role: "anchor" }], home)[0].url);
   assert.equal(url.searchParams.get("origin"), "34.76170,135.51570");
   assert.equal(url.searchParams.get("waypoints"), "34.39000,135.86000|34.37000,135.87000");
 });
@@ -147,4 +148,56 @@ test("「A は B より前」は、あいだに別の地点が入っても守る
   // 条件がなければ社1が先に来る
   const free = optimizeOrder(stops.map((s) => ({ ...s, before: [] })), home).map((s) => s.place.id);
   assert.ok(free.indexOf("社1") < free.indexOf("社3"), free.join(","));
+});
+
+const inn = place("宿", "lodging", 135.87, 34.36);
+
+test("宿に泊まると、宿で1日目が終わり、翌朝の出発時刻から2日目を数える", () => {
+  const stops = [
+    { place: museum, role: "primer" as const },
+    { place: inn, role: "stay" as const },
+    { place: main, role: "anchor" as const },
+  ];
+  const plan = schedule(stops, home, 8 * 60, 9 * 60);
+  assert.equal(plan.days, 2);
+  assert.deepEqual(plan.stops.map((s) => s.day), [1, 1, 2]);
+  assert.equal(plan.stops[1].depart, 9 * 60);
+  assert.equal(plan.stops[2].arrive, 9 * 60 + plan.stops[2].driveMin);
+  assert.equal(roleFor(inn, stops), "stay");
+});
+
+test("宿に遅れる分も遅れとして数える", () => {
+  const plan = schedule([{ place: inn, role: "stay" }], home, 17 * 60 + 50);
+  assert.ok(plan.lateMin > 0);
+  assert.equal(plan.lateMin, plan.stops[0].arrive - INN_BY);
+  assert.ok(plan.overMin >= plan.lateMin);
+});
+
+test("昼から出て1日で回りきれない行程は、宿をはさんで2日に分ける", () => {
+  const many = Array.from({ length: 6 }, (_, i) => ({ place: place(`社${i}`, "shrine" as const, 135.85 + i * 0.01, 34.37), role: "kin" as const }));
+  const stops = [{ place: inn, role: "stay" as const }, ...many];
+  const best = optimizeOrder(stops, home, 14 * 60, 9 * 60);
+  const plan = schedule(best, home, 14 * 60, 9 * 60);
+  assert.equal(plan.overMin, 0);
+  assert.ok(plan.stops.some((s) => s.day === 1 && s.role === "kin"));
+  assert.ok(plan.stops.some((s) => s.day === 2));
+});
+
+test("宿があると Google マップの経路は日ごとに分かれる", () => {
+  const routes = googleMapsRoutes([{ place: museum, role: "primer" }, { place: inn, role: "stay" }, { place: main, role: "anchor" }], home);
+  assert.equal(routes.length, 2);
+  const [d1, d2] = routes.map((r) => new URL(r.url).searchParams);
+  assert.equal(d1.get("destination"), "34.36000,135.87000");
+  assert.equal(d2.get("origin"), "34.36000,135.87000");
+  assert.equal(d2.get("destination"), "34.76170,135.51570");
+  assert.equal(d2.get("waypoints"), "34.37000,135.87000");
+});
+
+test("回る場所が少なければ、宿に昼過ぎに着くより1日目に多く回る", () => {
+  const few = Array.from({ length: 4 }, (_, i) => ({ place: place(`社${i}`, "shrine" as const, 135.85 + i * 0.01, 34.37), role: "kin" as const }));
+  const plan = schedule(optimizeOrder([...few, { place: inn, role: "stay" }], home, 8 * 60, 9 * 60), home, 8 * 60, 9 * 60);
+  const atInn = plan.stops.findIndex((s) => s.role === "stay");
+  const naive = schedule([few[0], { place: inn, role: "stay" }, ...few.slice(1)], home, 8 * 60, 9 * 60);
+  assert.ok(plan.earlyMin < naive.earlyMin);
+  assert.ok(atInn >= 1);
 });

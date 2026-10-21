@@ -34,13 +34,21 @@ const CATEGORY_LABEL: Record<Spot["cat"], string> = {
   other: "その他",
 };
 
-const PLACE_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", art: "美術館", castle: "城・城跡", info: "観光案内所" };
+const PLACE_LABEL: Record<Place["kind"], string> = {
+  shrine: "神社",
+  museum: "資料館・博物館",
+  art: "美術館",
+  castle: "城・城跡",
+  info: "観光案内所",
+  lodging: "宿",
+};
 const PLACE_BG: Record<Place["kind"], string> = {
   shrine: "bg-shrine",
   museum: "bg-museum",
   art: "bg-art",
   castle: "bg-castle",
   info: "bg-museum",
+  lodging: "bg-inn",
 };
 
 const escapeHtml = (s: string) =>
@@ -80,7 +88,11 @@ function bboxOf(g: import("geojson").Polygon | import("geojson").MultiPolygon) {
 
 const formatDate = (ts: string | null) => (ts ? ts.slice(0, 10).replaceAll("-", "/") : "—");
 
-const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: "#3b6fb6", anchor: "#c2412d", kin: "#e07a5f", extra: "#7b4fa0" };
+const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: "#3b6fb6", anchor: "#c2412d", kin: "#e07a5f", extra: "#7b4fa0", stay: "#3f7a46" };
+
+// 宿の空きを調べる検索（予約サイトを1つに決めない）
+export const innSearchLink = (p: Place) =>
+  `https://www.google.com/search?q=${encodeURIComponent(`${p.name} ${p.town} 宿泊予約`)}`;
 
 type PlanEdit = Pick<Props, "planIds" | "anchorId" | "onTogglePlace" | "onMakeAnchor">;
 
@@ -102,8 +114,12 @@ function renderActions(box: HTMLElement, place: Place, plan: PlanEdit) {
     box.append(s);
     return;
   }
-  if (place.kind !== "info") button("本命にする", "#c2412d", () => plan.onMakeAnchor(place));
   const inPlan = plan.planIds.has(place.id);
+  if (place.kind === "lodging") {
+    button(inPlan ? "泊まるのをやめる" : "ここに泊まる", inPlan ? "#6b665c" : "#3f7a46", () => plan.onTogglePlace(place));
+    return;
+  }
+  if (place.kind !== "info") button("本命にする", "#c2412d", () => plan.onMakeAnchor(place));
   button(inPlan ? "行程から外す" : "＋行程", inPlan ? "#6b665c" : "#3b6fb6", () => plan.onTogglePlace(place));
 }
 
@@ -377,7 +393,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
     placeMarkersRef.current = new Map();
     actionBoxesRef.current = new Map();
     if (!places) return;
-    for (const p of [...places.primers, ...(places.halls ?? []), ...(places.castles ?? []), ...places.anchors]) {
+    for (const p of [...places.primers, ...(places.halls ?? []), ...(places.castles ?? []), ...(places.lodgings ?? []), ...places.anchors]) {
       if (placeMarkersRef.current.has(p.id)) continue;
       const el = document.createElement("div");
       el.className = `size-3.5 cursor-pointer rounded-full ring-2 ring-white shadow ${PLACE_BG[p.kind]}`;
@@ -388,6 +404,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         `<strong>${escapeHtml(p.name)}</strong><br>${PLACE_LABEL[p.kind]} ・ ${escapeHtml(p.town)}` +
         (p.reasons.length ? `<br>${p.reasons.map(escapeHtml).join("・")}` : "") +
         (p.wikipedia ? `<br><a href="${escapeHtml(p.wikipedia)}" target="_blank" rel="noreferrer">Wikipedia</a>` : "") +
+        (p.kind === "lodging" ? `<br><a href="${escapeHtml(innSearchLink(p))}" target="_blank" rel="noreferrer">空室・料金を調べる</a>` : "") +
         mapLinks(p.lng, p.lat, `${p.name} ${p.town}`);
       const box = document.createElement("div");
       box.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin-top:8px";
@@ -417,11 +434,13 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         });
       }
       routeMarkersRef.current.forEach((m) => m.remove());
-      routeMarkersRef.current = (route?.stops ?? []).map((s, i) => {
+      let n = 0;
+      routeMarkersRef.current = (route?.stops ?? []).map((s) => {
         const el = document.createElement("div");
         el.className = "pointer-events-none grid size-5 place-items-center rounded-full text-[11px] font-bold text-white ring-2 ring-white shadow";
         el.style.backgroundColor = ROUTE_COLOR[s.role];
-        el.textContent = String(i + 1);
+        // 宿は番号の代わりに「泊」
+        el.textContent = s.role === "stay" ? "泊" : String(++n);
         return new maplibregl.Marker({ element: el, offset: [10, -10] }).setLngLat([s.place.lng, s.place.lat]).addTo(map);
       });
     };

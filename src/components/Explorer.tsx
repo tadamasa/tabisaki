@@ -1,8 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
-import { type Role, type Stop, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_START2, type Role, type Stop, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
 import type { AreaPlaces, Atlas, Place } from "@/lib/types";
 import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
 import ItineraryPanel from "./ItineraryPanel";
@@ -23,8 +23,8 @@ const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query
 const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
 
 // 編集した行程は、この端末のブラウザに地帯ごとに覚えておく
-// 3つ目が 1 の地点は、すぐ次の地点とつないである。4つ目は、この地点より後に回る地点の id
-type SavedPlan = { stops: [string, Role, (0 | 1)?, string[]?][]; start: number };
+// 3つ目が 1 の地点は、すぐ次の地点とつないである。4つ目は、この地点より後に回る地点の id。start2 は2日目に宿を出る時刻
+type SavedPlan = { stops: [string, Role, (0 | 1)?, string[]?][]; start: number; start2?: number };
 const PLANS_KEY = "tabisaki:plans";
 const DEFAULT_START = 8 * 60;
 
@@ -45,7 +45,12 @@ function writePlans(plans: Record<string, SavedPlan>) {
 }
 
 const AREA_PLACE = (ap: AreaPlaces) =>
-  new Map<string, Place>([...ap.anchors, ...ap.primers, ...(ap.halls ?? []), ...(ap.castles ?? [])].map((p) => [p.id, p]));
+  new Map<string, Place>(
+    [...ap.anchors, ...ap.primers, ...(ap.halls ?? []), ...(ap.castles ?? []), ...(ap.lodgings ?? [])].map((p) => [p.id, p]),
+  );
+
+// 開きそうな地帯の候補を先に取っておく数。OpenStreetMap に一度にたくさん問い合わせないよう、1つずつ順に取る
+const PREFETCH_COUNT = 3;
 
 async function fetchPlaces(areaId: string): Promise<NonNullable<PlacesState>> {
   try {
@@ -82,8 +87,36 @@ export default function Explorer() {
     fetchAtlas().then(setData, (e: Error) => setError(e.message));
   }, []);
 
-  const loadPlaces = (areaId: string) =>
-    fetchPlaces(areaId).then((r) => setPlaces((prev) => ({ ...prev, [areaId]: r })));
+  // 取りに行っている最中の地帯。先読みと、開いたときの読み込みが重ならないようにする
+  const inflight = useRef(new Map<string, Promise<void>>());
+  const loadPlaces = (areaId: string) => {
+    const running = inflight.current.get(areaId);
+    if (running) return running;
+    const p = fetchPlaces(areaId)
+      .then((r) => setPlaces((prev) => ({ ...prev, [areaId]: r })))
+      .finally(() => inflight.current.delete(areaId));
+    inflight.current.set(areaId, p);
+    return p;
+  };
+  // 候補はその場で OpenStreetMap に問い合わせるので、はじめて開く地帯は待たされる。
+  // 地図を出したら、近い地帯から順に裏で取っておく
+  useEffect(() => {
+    if (!data) return;
+    let cancelled = false;
+    (async () => {
+      for (const a of data.areas.filter((x) => x.km < maxKm).slice(0, PREFETCH_COUNT)) {
+        if (cancelled) return;
+        await loadPlaces(a.id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [data, maxKm]);
+  // 一覧で指を置いた・カーソルを乗せた地帯も先に取りに行く
+  const warm = (areaId: string) => {
+    if (!places[areaId]) loadPlaces(areaId);
+  };
   const retryPlaces = (areaId: string) => {
     setPlaces((prev) => {
       const next = { ...prev };
@@ -126,6 +159,7 @@ export default function Explorer() {
   // 保存した行程があればそれを、なければ本命の候補の一番目から組んだ行程を出す
   const saved = loaded ? plans[loaded.areaId] : undefined;
   const start = saved?.start ?? DEFAULT_START;
+  const start2 = saved?.start2 ?? DEFAULT_START2;
   const stops: Stop[] = !loaded
     ? []
     : saved
@@ -134,9 +168,9 @@ export default function Explorer() {
           return place ? [{ place, role, linkNext: link === 1, before }] : [];
         })
       : suggestPlan(loaded, home, undefined, start);
-  const plan = loaded ? schedule(stops, home, start) : null;
+  const plan = loaded ? schedule(stops, home, start, start2) : null;
 
-  const savePlan = (next: Stop[] | null, nextStart = start) => {
+  const savePlan = (next: Stop[] | null, nextStart = start, nextStart2 = start2) => {
     if (!loaded) return;
     setPlans((prev) => {
       const all = { ...prev };
@@ -144,22 +178,31 @@ export default function Explorer() {
               ? [s.place.id, s.role, s.linkNext ? 1 : 0, s.before]
               : s.linkNext
                 ? [s.place.id, s.role, 1]
-                : [s.place.id, s.role])), start: nextStart };
+                : [s.place.id, s.role])), start: nextStart, start2: nextStart2 };
       else delete all[loaded.areaId];
       writePlans(all);
       return all;
     });
   };
-  // 足したら、全体をいちばん早く帰れる順に組み直す。行程にあれば外す
+  // 外すときは、前の地点からのつながりも切る
+  const without = (list: Stop[], drop: (s: Stop) => boolean) =>
+    list.flatMap((s, k) => (drop(s) ? [] : k + 1 < list.length && drop(list[k + 1]) ? [{ ...s, linkNext: false }] : [s]));
+  // 足したら、全体を運転がいちばん短くなる順に組み直す。行程にあれば外す。宿は1か所だけで、選び直すと入れ替わる
   const togglePlace = (p: Place) => {
-    const at = stops.findIndex((s) => s.place.id === p.id);
-    // 外すときは、前の地点からのつながりも切る
-    if (at >= 0) return savePlan(stops.flatMap((s, k) => (k === at ? [] : k === at - 1 ? [{ ...s, linkNext: false }] : [s])));
-    savePlan(optimizeOrder([...stops, { place: p, role: roleFor(p, stops) }], home, start));
+    if (stops.some((s) => s.place.id === p.id)) return savePlan(without(stops, (s) => s.place.id === p.id));
+    const role = roleFor(p, stops);
+    const base = role === "stay" ? without(stops, (s) => s.role === "stay") : stops;
+    savePlan(optimizeOrder([...base, { place: p, role }], home, start, start2));
   };
-  const makeAnchor = (p: Place) => loaded && savePlan(suggestPlan(loaded, home, p.id, start));
+  // 本命を選び直しても、決めてある宿はそのまま残す
+  const makeAnchor = (p: Place) => {
+    if (!loaded) return;
+    const stay = stops.find((s) => s.role === "stay");
+    const next = suggestPlan(loaded, home, p.id, start);
+    savePlan(stay ? optimizeOrder([...next, { place: stay.place, role: "stay" }], home, start, start2) : next);
+  };
   const reorder = () => {
-    const next = optimizeOrder(stops, home, start);
+    const next = optimizeOrder(stops, home, start, start2);
     const changed = next.some((s, i) => s.place.id !== stops[i].place.id);
     savePlan(next);
     return changed;
@@ -264,6 +307,7 @@ export default function Explorer() {
                     home={home}
                     onChange={(next) => savePlan(next)}
                     onStart={(min) => savePlan(stops, min)}
+                    onStart2={(min) => savePlan(stops, start, min)}
                     onReset={() => savePlan(null)}
                     onOptimize={reorder}
                     onFocus={setFocus}
@@ -375,6 +419,10 @@ export default function Explorer() {
                   <span className="inline-block size-2.5 rounded-full bg-castle" />
                   城・城跡
                 </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="inline-block size-2.5 rounded-full bg-inn" />
+                  宿
+                </li>
               </ul>
             </header>
 
@@ -388,6 +436,8 @@ export default function Explorer() {
                     <button
                       type="button"
                       onClick={() => selectArea(a.id)}
+                      onPointerEnter={() => warm(a.id)}
+                      onTouchStart={() => warm(a.id)}
                       className="flex min-h-12 w-full items-baseline justify-between gap-3 px-4 py-3 text-left hover:bg-background"
                     >
                       <span>

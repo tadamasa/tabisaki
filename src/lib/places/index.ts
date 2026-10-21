@@ -1,13 +1,16 @@
 import "server-only";
+import * as turf from "@turf/turf";
 import { cacheLife, cacheTag } from "next/cache";
-import type { AreaPlaces } from "@/lib/types";
+import type { AreaPlaces, Spot } from "@/lib/types";
 import { ATLAS_TAG, getAtlas, readBoundary } from "@/lib/atlas";
 import { type VisitedShrine, findDeityKin, findEn, findLineage } from "./en";
 import { type OsmElement, type Town, pairPrimer, rankPlaces } from "./rank";
 import { fetchWikiShrines, isNear, titleCandidates } from "./wiki";
 
-// OVERPASS_URL はカンマ区切りで複数指定でき、失敗したら次を試す
-const DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter";
+// OVERPASS_URL はカンマ区切りで複数指定できる。先頭から少しずつ時間をずらして問い合わせ、最初に返った結果を使う
+const DEFAULT_OVERPASS =
+  "https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter,https://overpass.private.coffee/api/interpreter";
+const HEDGE_MS = 4000;
 
 const query = ([w, s, e, n]: number[]) => {
   const bbox = `${s},${w},${n},${e}`;
@@ -17,40 +20,72 @@ const query = ([w, s, e, n]: number[]) => {
   nwr["tourism"~"^(museum|gallery)$"]["name"](${bbox});
   nwr["historic"="castle"]["name"](${bbox});
   nwr["tourism"="information"]["information"~"^(office|visitor_centre)$"]["name"](${bbox});
+  nwr["tourism"~"^(hotel|guest_house|hostel|motel)$"]["name"](${bbox});
 );
-out center tags;`;
+out center tags qt;`;
 };
 
-async function fetchOverpass(bbox: number[]): Promise<{ elements: OsmElement[]; source: string }> {
-  const errors: string[] = [];
-  for (const url of (process.env.OVERPASS_URL ?? DEFAULT_OVERPASS).split(",").map((s) => s.trim())) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "tabisaki/0.1 (personal trip planner)" },
-        body: new URLSearchParams({ data: query(bbox) }),
-        signal: AbortSignal.timeout(70_000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { elements: OsmElement[] };
-      return { elements: body.elements, source: new URL(url).host };
-    } catch (e) {
-      errors.push(`${url}: ${e instanceof Error ? e.message : e}`);
-    }
-  }
-  throw new Error(`OpenStreetMap の検索に失敗しました（${errors.join(" / ")}）`);
+async function askOverpass(url: string, bbox: number[], signal: AbortSignal) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "tabisaki/0.1 (personal trip planner)" },
+    body: new URLSearchParams({ data: query(bbox) }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(70_000)]),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = (await res.json()) as { elements: OsmElement[] };
+  return { elements: body.elements, source: new URL(url).host };
 }
 
-// 参拝済みの神社の祭神を Wikipedia の記事から読む。記事の座標が訪問地点に近いものだけ採る
+// 混んでいる窓口に待たされないよう、返事が遅ければ次の窓口にも問い合わせる（hedged request）
+async function fetchOverpass(bbox: number[]): Promise<{ elements: OsmElement[]; source: string }> {
+  const urls = (process.env.OVERPASS_URL ?? DEFAULT_OVERPASS).split(",").map((s) => s.trim());
+  const stop = new AbortController();
+  const errors: string[] = [];
+  try {
+    return await Promise.any(
+      urls.map(async (url, i) => {
+        if (i > 0) await new Promise((r) => setTimeout(r, i * HEDGE_MS));
+        if (stop.signal.aborted) throw new Error("不要");
+        try {
+          return await askOverpass(url, bbox, stop.signal);
+        } catch (e) {
+          errors.push(`${url}: ${e instanceof Error ? e.message : e}`);
+          throw e;
+        }
+      }),
+    );
+  } catch {
+    throw new Error(`OpenStreetMap の検索に失敗しました（${errors.join(" / ")}）`);
+  } finally {
+    stop.abort();
+  }
+}
+
+// OpenStreetMap の結果は訪問記録と関係ないので、記録を読み直しても捨てずに長く覚えておく
+async function getOsm(bbox: number[]) {
+  "use cache: remote";
+  cacheLife("weeks");
+  return fetchOverpass(bbox);
+}
+
+// 記事の祭神も同じく、記録の読み直しでは捨てない
+async function getWikiShrines(titles: string[]) {
+  "use cache: remote";
+  cacheLife("weeks");
+  return [...(await fetchWikiShrines(titles)).entries()];
+}
+
+// 参拝済みの神社の祭神を Wikipedia の記事から読む。記事の座標が訪問地点に近いものだけ採る。
+// 新しく参拝した社の祭神は、この覚えが切れたとき（数日）に反映される
 async function getVisitedDeities(): Promise<VisitedShrine[]> {
   "use cache: remote";
   cacheLife("days");
-  cacheTag(ATLAS_TAG);
 
   const atlas = await getAtlas();
   const shrines = new Map<string, (typeof atlas.spots)[number]>();
   for (const s of atlas.spots) if (s.cat === "shrine") shrines.set(`${s.muni}:${s.name}`, s);
-  const pages = await fetchWikiShrines([...shrines.values()].flatMap((s) => titleCandidates(s.name)));
+  const pages = new Map(await getWikiShrines([...shrines.values()].flatMap((s) => titleCandidates(s.name)).sort()));
   const result: VisitedShrine[] = [];
   for (const s of shrines.values()) {
     const page = titleCandidates(s.name).map((t) => pages.get(t)).find((p) => p && isNear(p, s.lat, s.lng));
@@ -59,10 +94,10 @@ async function getVisitedDeities(): Promise<VisitedShrine[]> {
   return result;
 }
 
-// Wikipedia に届かなくても候補は出す（祭神の縁だけが欠ける）
-async function safely<T>(p: Promise<T>, fallback: T): Promise<T> {
+// Wikipedia が遅いときや届かないときも候補は出す（祭神の縁だけが欠ける）
+async function safely<T>(p: Promise<T>, fallback: T, ms = 8000): Promise<T> {
   try {
-    return await p;
+    return await Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))]);
   } catch (e) {
     console.error("祭神を読めませんでした", e);
     return fallback;
@@ -72,7 +107,8 @@ async function safely<T>(p: Promise<T>, fallback: T): Promise<T> {
 const wikiTitle = (url: string | null) =>
   url?.startsWith("https://ja.wikipedia.org/wiki/") ? decodeURIComponent(url.slice(30)).replaceAll("_", " ") : null;
 
-// Overpass は公共の窓口なので、結果は全インスタンスで共有するキャッシュに置く
+const round = (bbox: number[]) => bbox.map((v, i) => (i < 2 ? Math.floor(v * 100) / 100 : Math.ceil(v * 100) / 100));
+
 export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> {
   "use cache: remote";
   cacheLife("days");
@@ -82,25 +118,45 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
   const area = atlas.areas.find((a) => a.id === areaId);
   if (!area) return null;
 
+  // 地帯の町に加えて、隣り合う「行ったことのある町」も探す（まだ行っていない場所だけを出す）
+  const inArea = new Set(area.towns.map((t) => t.id));
+  const muni = new Map(atlas.municipalities.features.map((f) => [f.properties.id, f.properties]));
+  const { edges } = (await readBoundary("edges")) as { edges: [string, string, number][] };
+  const neighbors = new Set<string>();
+  for (const [a, b] of edges) {
+    if (inArea.has(a) && !inArea.has(b) && muni.get(b)?.visited) neighbors.add(b);
+    if (inArea.has(b) && !inArea.has(a) && muni.get(a)?.visited) neighbors.add(a);
+  }
+
   // 町の判定は細かい境界で行う
-  const ids = new Map(area.towns.map((t) => [t.id, t.name]));
   const detailed = await readBoundary("detailed");
   const towns: Town[] = [];
   for (const f of detailed.features) {
-    const name = ids.get(f.properties.N03_007);
-    if (name && f.geometry) towns.push({ id: f.properties.N03_007, name, geometry: f.geometry });
+    const id = f.properties.N03_007;
+    if (!f.geometry || !(inArea.has(id) || neighbors.has(id))) continue;
+    const name = area.towns.find((t) => t.id === id)?.name ?? muni.get(id)?.short ?? id;
+    towns.push({ id, name, geometry: f.geometry, outside: neighbors.has(id) });
   }
+  const bbox = round(turf.bbox(turf.featureCollection(towns.map((t) => turf.feature(t.geometry)))));
 
-  const { elements, source } = await fetchOverpass(area.bbox);
-  const ranked = rankPlaces(elements, towns);
+  // 行ったことのある町では、記録のある場所（近くにある、または同じ名前）を除く
+  const spotsByMuni = new Map<string, Spot[]>();
+  for (const s of atlas.spots) if (s.muni && neighbors.has(s.muni)) spotsByMuni.set(s.muni, [...(spotsByMuni.get(s.muni) ?? []), s]);
+  const bare = (n: string) => n.replace(/\s*[（(].*?[)）]\s*/g, "").trim();
+  const visitedHere = (townId: string, name: string, lat: number, lng: number) =>
+    (spotsByMuni.get(townId) ?? []).some(
+      (s) => bare(s.name) === bare(name) || turf.distance([s.lng, s.lat], [lng, lat]) <= 0.2,
+    );
+
+  const { elements, source } = await getOsm(bbox);
+  const ranked = rankPlaces(elements, towns, visitedHere);
 
   const visitedShrines = atlas.spots.filter((s) => s.cat === "shrine");
-  const townNames = new Map(atlas.municipalities.features.map((f) => [f.properties.id, f.properties.short]));
-  const townOf = (muni: string | null) => (muni ? townNames.get(muni) ?? null : null);
+  const townOf = (id: string | null) => (id ? muni.get(id)?.short ?? null : null);
   const anchorTitles = (a: (typeof ranked.anchors)[number]) => [wikiTitle(a.wikipedia), a.name].filter((t): t is string => !!t);
   const [visitedDeities, anchorPages] = await Promise.all([
     safely(getVisitedDeities(), []),
-    safely(fetchWikiShrines(ranked.anchors.flatMap(anchorTitles)), new Map()),
+    safely(getWikiShrines(ranked.anchors.flatMap(anchorTitles).sort()), []).then((e) => new Map(e)),
   ]);
   const deitiesOf = (a: (typeof ranked.anchors)[number]) =>
     anchorTitles(a).map((t) => anchorPages.get(t)).find((p) => p && isNear(p, a.lat, a.lng))?.deities ?? [];
@@ -118,6 +174,7 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
     primers: ranked.primers,
     halls: ranked.halls,
     castles: ranked.castles,
+    lodgings: ranked.lodgings,
     shrineCount: ranked.shrineCount,
     source: `OpenStreetMap（${source}）`,
   };

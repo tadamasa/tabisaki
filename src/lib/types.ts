@@ -56,7 +56,7 @@ export type Atlas = {
 
 export type Place = {
   id: string;
-  kind: "shrine" | "museum" | "art" | "castle" | "info";
+  kind: "shrine" | "museum" | "art" | "castle" | "info" | "lodging";
   name: string;
   lat: number;
   lng: number;
@@ -65,6 +65,8 @@ export type Place = {
   reasons: string[];
   wikipedia: string | null;
   website: string | null;
+  // 空白地帯の外、隣の「行ったことのある町」にある場所
+  outside?: boolean;
 };
 
 export type AreaPlaces = {
@@ -75,6 +77,8 @@ export type AreaPlaces = {
   halls: Place[];
   // 城・城跡
   castles: Place[];
+  // 宿（旅館・ホテルなど）
+  lodgings: Place[];
   shrineCount: number;
   source: string;
 };

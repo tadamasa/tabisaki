@@ -76,3 +76,25 @@ test("城・城跡を目的地の候補として、記事や史跡指定のあ�
   assert.deepEqual(r.castles[1].reasons, ["城跡"]);
   assert.ok(!r.anchors.some((a) => a.kind === "castle"));
 });
+
+test("隣の行ったことのある町では、記録のない場所だけを後ろに出し、宿も拾う", () => {
+  const withNeighbor: Town[] = [...towns, { id: "29442", name: "隣町", geometry: square(136.5, 34.45), outside: true }];
+  const more = [
+    ...elements,
+    node(9, 136.52, 34.52, { amenity: "place_of_worship", religion: "shinto", name: "参拝済みの社", wikipedia: "ja:y" }),
+    node(10, 136.53, 34.53, { tourism: "museum", name: "隣町郷土資料館", wikipedia: "ja:z" }),
+    node(11, 135.84, 34.34, { tourism: "hotel", name: "吉野温泉 元湯" }),
+    node(12, 136.54, 34.54, { tourism: "hotel", name: "駅前ホテル" }),
+  ];
+  const visited = (townId: string, name: string) => townId === "29442" && name === "参拝済みの社";
+  const r = rankPlaces(more, withNeighbor, visited);
+  // 地帯の外の神社（7）は隣町にあり記録もないので、隣町の社として最後に出る
+  assert.equal(r.anchors.at(-1)?.name, "地帯の外の神社");
+  assert.ok(r.anchors.at(-1)?.outside);
+  assert.ok(r.anchors.at(-1)?.reasons.includes("行ったことのある町"));
+  assert.ok(!r.anchors.some((a) => a.name === "参拝済みの社"));
+  assert.equal(r.shrineCount, 3);
+  assert.deepEqual(r.halls.map((h) => h.name), ["吉野歴史資料館", "隣町郷土資料館"]);
+  assert.deepEqual(r.lodgings.map((l) => l.name), ["吉野温泉 元湯", "駅前ホテル"]);
+  assert.ok(r.lodgings[0].reasons.includes("旅館・温泉宿"));
+});

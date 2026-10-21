@@ -1,21 +1,36 @@
-// 日帰りの行程を組む。資料館で予習してから本命へ、を守り、ゆかりの社や立ち寄り先は
-// 本命の前後どちらでも、いちばん早く帰れる順に入れる。道路データは使わないので、時間は直線距離からの目安。
+// 日帰り、または宿に泊まる行程を組む。資料館で予習してから本命へ、を守り、ゆかりの社や立ち寄り先は
+// 本命の前後どちらでも、運転がいちばん短くなる順に入れる。道路データは使わないので、時間は直線距離からの目安。
 import type { AreaPlaces, Place } from "@/lib/types";
 
-export type Role = "primer" | "anchor" | "kin" | "extra";
+// stay: 泊まる宿。宿に着いたら1日目が終わり、翌朝そこから2日目を始める
+export type Role = "primer" | "anchor" | "kin" | "extra" | "stay";
 // linkNext: すぐ次の地点とつなぐ。つないだ2か所は、並べ直しても続けてこの順に回る
 // before: この地点より後に回る地点の id。あいだに別の地点が入ってもよい
 export type Stop = { place: Place; role: Role; linkNext?: boolean; before?: string[] };
-export type TimedStop = Stop & { driveMin: number; arrive: number; depart: number; stayMin: number };
-export type Plan = { start: number; stops: TimedStop[]; returnMin: number; home: number; overMin: number };
+// day: 何日目に着くか。宿の depart は翌朝の出発時刻
+export type TimedStop = Stop & { driveMin: number; arrive: number; depart: number; stayMin: number; day: number };
+// overMin: 宿に18時、自宅に19時を過ぎる分の合計。lateMin: そのうち宿に遅れる分。earlyMin: 宿に15時より早く着く分
+export type Plan = {
+  start: number;
+  start2: number;
+  stops: TimedStop[];
+  returnMin: number;
+  home: number;
+  days: number;
+  driveMin: number;
+  overMin: number;
+  lateMin: number;
+  earlyMin: number;
+};
 
 // 滞在の目安（分）。博物館・美術館・城が本命のときは長めに見る
-export const STAY_MIN: Record<Role, number> = { primer: 60, anchor: 60, kin: 30, extra: 45 };
+export const STAY_MIN: Record<Role, number> = { primer: 60, anchor: 60, kin: 30, extra: 45, stay: 0 };
 const HALL_ANCHOR_MIN = 90;
 export const stayOf = (s: Stop) => (s.role === "anchor" && s.place.kind !== "shrine" ? HALL_ANCHOR_MIN : STAY_MIN[s.role]);
 
 // 足した場所の役目。社はゆかり、本命が社なら資料館・案内所は予習、ほかは立ち寄り
 export function roleFor(p: Place, stops: Stop[]): Role {
+  if (p.kind === "lodging") return "stay";
   if (p.kind === "shrine") return "kin";
   const anchor = stops.find((s) => s.role === "anchor");
   if (p.kind === "info" || (p.kind === "museum" && anchor?.place.kind === "shrine")) return "primer";
@@ -23,6 +38,10 @@ export function roleFor(p: Place, stops: Stop[]): Role {
 }
 // 行程の終わりの目安（自宅に着く時刻、分）
 export const DAY_END = 19 * 60;
+// 宿のチェックインと、宿に着きたい時刻、2日目に宿を出る時刻の既定
+export const CHECK_IN = 15 * 60;
+export const INN_BY = 18 * 60;
+export const DEFAULT_START2 = 9 * 60;
 const MAX_KIN = 5;
 const PRIMER_MAX_KM = 25;
 
@@ -41,21 +60,48 @@ export function driveMinutes(from: [number, number], to: [number, number]) {
 
 const at = (p: Place): [number, number] => [p.lng, p.lat];
 
-export function schedule(stops: Stop[], home: [number, number], start = 8 * 60): Plan {
+export function schedule(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2): Plan {
   let t = start;
   let here = home;
+  let day = 1;
+  let drive = 0;
+  let lateMin = 0;
+  let earlyMin = 0;
   const timed: TimedStop[] = stops.map((s) => {
     const driveMin = driveMinutes(here, at(s.place));
+    drive += driveMin;
     const arrive = t + driveMin;
     const stayMin = stayOf(s);
-    t = arrive + stayMin;
     here = at(s.place);
-    return { ...s, driveMin, arrive, depart: t, stayMin };
+    const thisDay = day;
+    if (s.role === "stay") {
+      lateMin += Math.max(0, arrive - INN_BY);
+      earlyMin += Math.max(0, CHECK_IN - arrive);
+      day++;
+      t = start2;
+    } else t = arrive + stayMin;
+    return { ...s, driveMin, arrive, depart: t, stayMin, day: thisDay };
   });
   const returnMin = driveMinutes(here, home);
   const homeAt = t + returnMin;
-  return { start, stops: timed, returnMin, home: homeAt, overMin: Math.max(0, homeAt - DAY_END) };
+  return {
+    start,
+    start2,
+    stops: timed,
+    returnMin,
+    home: homeAt,
+    days: day,
+    driveMin: drive + returnMin,
+    overMin: lateMin + Math.max(0, homeAt - DAY_END),
+    lateMin,
+    earlyMin,
+  };
 }
+
+// 並べ方の良し悪し。運転の合計に、宿や自宅に遅れる分を重く足す（日帰りなら早く帰れる順と同じ）。
+// 宿に昼過ぎに着いてしまう並びも避ける（チェックインまでの待ちを、運転と同じ重さで数える）
+const OVER_WEIGHT = 3;
+export const costOf = (p: Plan) => p.driveMin + OVER_WEIGHT * p.overMin + p.earlyMin;
 
 // 本命と、系統か祭神で縁のある社を先に、次に由緒の手がかりが多い社を並べる
 function kinCandidates(places: AreaPlaces, anchor: Place) {
@@ -99,12 +145,12 @@ export function suggestPlan(places: AreaPlaces, home: [number, number], anchorId
 }
 
 // ゆかりの社は、帰りの時刻がいちばん早くなる位置に入れる（本命の前でもよい）
-export function insertKin(stops: Stop[], kin: Stop, home: [number, number], start = 8 * 60): Stop[] {
+export function insertKin(stops: Stop[], kin: Stop, home: [number, number], start = 8 * 60, start2 = DEFAULT_START2): Stop[] {
   let best: Stop[] | null = null;
   let bestHome = Infinity;
   for (let i = 0; i <= stops.length; i++) {
     const next = [...stops.slice(0, i), kin, ...stops.slice(i)];
-    const h = schedule(next, home, start).home;
+    const h = costOf(schedule(next, home, start, start2));
     if (h < bestHome) {
       bestHome = h;
       best = next;
@@ -123,7 +169,8 @@ export function blocksOf(stops: Stop[]): Stop[][] {
   return blocks.map((b) => (b[b.length - 1].linkNext ? [...b.slice(0, -1), { ...b[b.length - 1], linkNext: false }] : b));
 }
 
-// 予習先が本命より前にあることと、つないだ地点の並びを守って、帰りがいちばん早くなる順に並べ直す。
+// 予習先が本命より前にあることと、つないだ地点の並びを守って、運転がいちばん短くなる順に並べ直す。
+// 宿があれば、どこを1日目に、どこを2日目に回るかもあわせて決まる。
 // かたまりが8つまでなら全部の順番を試し、それより多いときは区間を裏返す改善（2-opt）で縮める。
 // 「A は B より前」の条件も守る。条件どうしがぶつかって守れないときは、今の順のままにする
 const EXACT_MAX = 8;
@@ -149,12 +196,12 @@ function* permutations<T>(xs: T[]): Generator<T[]> {
   }
 }
 
-export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60): Stop[] {
+export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2): Stop[] {
   const blocks = blocksOf(stops);
   if (blocks.length <= 1) return blocks.flat();
   const cost = (order: Stop[][]) => {
     const o = order.flat();
-    return primerFirst(o) && keepsOrder(o) ? schedule(o, home, start).home : Infinity;
+    return primerFirst(o) && keepsOrder(o) ? costOf(schedule(o, home, start, start2)) : Infinity;
   };
   // 今の順で同点なら動かさない
   let best = blocks;
@@ -186,17 +233,33 @@ export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 *
 
 export const clock = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
 
-// Google マップの経路（自宅発・自宅着、立ち寄りは9か所まで）
+// Google マップの経路。宿があれば日ごとに分ける（自宅または宿から、宿または自宅まで。立ち寄りは9か所まで）
 export const MAPS_WAYPOINT_MAX = 9;
 
-export function googleMapsRoute(stops: Stop[], home: [number, number]) {
+export function googleMapsRoutes(stops: Stop[], home: [number, number]) {
   const ll = ([lng, lat]: [number, number]) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
-  const params = new URLSearchParams({
-    api: "1",
-    origin: ll(home),
-    destination: ll(home),
-    travelmode: "driving",
-    waypoints: stops.slice(0, MAPS_WAYPOINT_MAX).map((s) => ll(at(s.place))).join("|"),
-  });
-  return `https://www.google.com/maps/dir/?${params}`;
+  const legs: { from: [number, number]; to: [number, number]; via: Stop[] }[] = [];
+  let from = home;
+  let via: Stop[] = [];
+  for (const s of stops) {
+    if (s.role !== "stay") {
+      via.push(s);
+      continue;
+    }
+    legs.push({ from, to: at(s.place), via });
+    from = at(s.place);
+    via = [];
+  }
+  legs.push({ from, to: home, via });
+  return legs.map((leg, i) => ({
+    day: i + 1,
+    dropped: Math.max(0, leg.via.length - MAPS_WAYPOINT_MAX),
+    url: `https://www.google.com/maps/dir/?${new URLSearchParams({
+      api: "1",
+      origin: ll(leg.from),
+      destination: ll(leg.to),
+      travelmode: "driving",
+      waypoints: leg.via.slice(0, MAPS_WAYPOINT_MAX).map((s) => ll(at(s.place))).join("|"),
+    })}`,
+  }));
 }
