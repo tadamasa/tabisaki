@@ -63,20 +63,13 @@ function EnNote({ en }: { en: En }) {
   );
 }
 
-// 社格（Wikipedia の基礎情報から）と、並び順の点数の内訳
+// 社格（Wikipedia の基礎情報から）。点数の内訳は持っているが、画面には出さない
 function RankNote({ place }: { place: Place }) {
-  const basis = place.basis ?? [];
   return (
-    <div className="mt-1.5 text-xs text-muted">
-      <p>
-        <span className="font-medium text-foreground">社格</span>{" "}
-        {place.shakaku?.length ? place.shakaku.join("・") : "記事に記載が見つかりませんでした"}
-      </p>
-      <p>
-        <span className="font-medium text-foreground">並び順の根拠</span>{" "}
-        {basis.length ? `${basis.map((b) => `${b.label} +${b.pts}`).join("・")} ＝ ${place.score}点` : "手がかりなし（0点）"}
-      </p>
-    </div>
+    <p className="mt-1.5 text-xs text-muted">
+      <span className="font-medium text-foreground">社格</span>{" "}
+      {place.shakaku?.length ? place.shakaku.join("・") : "記事に記載が見つかりませんでした"}
+    </p>
   );
 }
 
