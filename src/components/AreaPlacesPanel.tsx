@@ -1,10 +1,27 @@
 "use client";
 
+import { TOWN_AREA_PREFIX } from "@/lib/townArea";
 import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
 
-const KIND_LABEL: Record<Place["kind"], string> = { shrine: "神社", museum: "資料館・博物館", info: "観光案内所" };
+const KIND_LABEL: Record<Place["kind"], string> = {
+  shrine: "神社",
+  museum: "資料館・博物館",
+  art: "美術館",
+  castle: "城・城跡",
+  info: "観光案内所",
+  lodging: "宿",
+};
+const DOT: Record<Place["kind"], string> = {
+  shrine: "bg-shrine",
+  museum: "bg-museum",
+  art: "bg-art",
+  castle: "bg-castle",
+  info: "bg-museum",
+  lodging: "bg-inn",
+};
+const innSearchLink = (p: Place) => `https://www.google.com/search?q=${encodeURIComponent(`${p.name} ${p.town} 宿泊予約`)}`;
 
 const mapsLink = (p: Place) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.name} ${p.town}`)}`;
@@ -46,10 +63,97 @@ function EnNote({ en }: { en: En }) {
   );
 }
 
-type Props = { state: PlacesState; onRetry: () => void; onFocus: (p: Place) => void };
+// 社格（Wikipedia の基礎情報から）。点数の内訳は持っているが、画面には出さない
+function RankNote({ place }: { place: Place }) {
+  return (
+    <p className="mt-1.5 text-xs text-muted">
+      <span className="font-medium text-foreground">社格</span>{" "}
+      {place.shakaku?.length ? place.shakaku.join("・") : "記事に記載が見つかりませんでした"}
+    </p>
+  );
+}
 
-export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
-  if (!state) return <p className="mt-3 text-sm text-muted">この地帯の神社と資料館を探しています…</p>;
+type Props = {
+  state: PlacesState;
+  onRetry: () => void;
+  onFocus: (p: Place) => void;
+  // 行程の編集
+  planIds: Set<string>;
+  anchorId: string | null;
+  onToggle: (p: Place) => void;
+  onMakeAnchor: (p: Place) => void;
+};
+
+type PlanProps = Pick<Props, "planIds" | "anchorId" | "onToggle" | "onMakeAnchor">;
+
+// 指で押しやすいよう、ボタンは高さを取る
+const BTN = "inline-flex min-h-8 items-center rounded-full border px-2.5";
+
+function PlanButtons({ place, planIds, anchorId, onToggle, onMakeAnchor }: PlanProps & { place: Place }) {
+  if (place.id === anchorId) return <span className="shrink-0 text-xs font-medium text-shrine">本命</span>;
+  const inPlan = planIds.has(place.id);
+  if (place.kind === "lodging") {
+    return (
+      <span className="flex shrink-0 flex-wrap justify-end gap-1.5 text-xs">
+        <a href={innSearchLink(place)} target="_blank" rel="noreferrer" className={`${BTN} border-border text-muted`}>
+          空室を調べる
+        </a>
+        <button
+          type="button"
+          onClick={() => onToggle(place)}
+          className={`${BTN} ${inPlan ? "border-border text-muted" : "border-inn/50 text-inn"}`}
+        >
+          {inPlan ? "泊まるのをやめる" : "ここに泊まる"}
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="flex shrink-0 flex-wrap justify-end gap-1.5 text-xs">
+      {place.kind !== "info" && (
+        <button type="button" onClick={() => onMakeAnchor(place)} className={`${BTN} border-shrine/40 text-shrine`}>
+          本命にする
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => onToggle(place)}
+        className={`${BTN} ${inPlan ? "border-border text-muted" : "border-museum/40 text-museum"}`}
+      >
+        {inPlan ? "行程から外す" : "＋行程"}
+      </button>
+    </span>
+  );
+}
+
+function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFocus: (p: Place) => void }) {
+  return (
+    <li className="flex items-start justify-between gap-2 py-1.5">
+      <span className="min-w-0">
+        <span className={`mr-1.5 inline-block size-2 rounded-full ${DOT[place.kind]}`} />
+        <PlaceName place={place} />
+        <span className="ml-1.5 text-xs text-muted">
+          {KIND_LABEL[place.kind]} ・ {place.town}
+        </span>{" "}
+        <button type="button" onClick={() => onFocus(place)} className="text-xs text-museum underline">
+          地図
+        </button>
+        {place.reasons.length > 0 && (
+          <span className="ml-1.5 text-[11px] text-muted">{place.reasons.join("・")}</span>
+        )}
+      </span>
+      <PlanButtons place={place} {...plan} />
+    </li>
+  );
+}
+
+export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Props) {
+  if (!state)
+    return (
+      <p className="mt-3 text-sm text-muted">
+        この地帯の神社・館・宿を探しています…（はじめて開く地帯は OpenStreetMap への問い合わせで少し待ちます。2回目からはすぐ出ます）
+      </p>
+    );
   if ("error" in state) {
     return (
       <p className="mt-3 text-sm text-muted">
@@ -61,12 +165,13 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
     );
   }
 
-  const { anchors, primers, shrineCount, source } = state;
+  const { anchors, primers, halls = [], castles = [], lodgings = [], shrineCount, source } = state;
+  const infos = primers.filter((p) => p.kind === "info");
   return (
     <div className="mt-4 space-y-4">
       <section>
         <h3 className="text-xs font-semibold tracking-wide text-muted">
-          本命の候補（地帯の神社 {shrineCount} 社から）
+          神社（{state.areaId.startsWith(TOWN_AREA_PREFIX) ? "この町" : "地帯"}の {shrineCount} 社から）
         </h3>
         {anchors.length === 0 ? (
           <p className="mt-1 text-sm text-muted">名前のわかる神社が見つかりませんでした。</p>
@@ -84,15 +189,19 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
                     地図
                   </button>
                 </div>
+                <div className="mt-1 flex justify-end">
+                  <PlanButtons place={a} {...plan} />
+                </div>
                 {a.reasons.length > 0 && (
                   <ul className="mt-1 flex flex-wrap gap-1">
                     {a.reasons.map((r) => (
-                      <li key={r} className="rounded bg-shrine/10 px-1.5 text-[11px] text-shrine">
+                      <li key={r} className={`rounded px-1.5 text-[11px] ${r === "行ったことのある町" ? "bg-visited/10 text-visited" : "bg-shrine/10 text-shrine"}`}>
                         {r}
                       </li>
                     ))}
                   </ul>
                 )}
+                <RankNote place={a} />
                 {a.en && <EnNote en={a.en} />}
                 {a.primer && (
                   <p className="mt-1.5 text-xs text-muted">
@@ -110,29 +219,57 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus }: Props) {
       </section>
 
       <section>
-        <h3 className="text-xs font-semibold tracking-wide text-muted">先に寄る資料館・案内所</h3>
-        {primers.length === 0 ? (
-          <p className="mt-1 text-sm text-muted">地帯の中には見つかりませんでした。隣の町の資料館を探すのがよさそうです。</p>
+        <h3 className="text-xs font-semibold tracking-wide text-muted">博物館・美術館・資料館</h3>
+        {halls.length === 0 ? (
+          <p className="mt-1 text-sm text-muted">地帯の中には見つかりませんでした。隣の町を探すのがよさそうです。</p>
         ) : (
-          <ul className="mt-1 space-y-1 text-sm">
-            {primers.map((p) => (
-              <li key={p.id} className="flex items-baseline justify-between gap-2">
-                <span>
-                  <span className="mr-1.5 inline-block size-2 rounded-full bg-museum" />
-                  <PlaceName place={p} />
-                  <span className="ml-1.5 text-xs text-muted">
-                    {KIND_LABEL[p.kind]} ・ {p.town}
-                  </span>
-                </span>
-                <button type="button" onClick={() => onFocus(p)} className="shrink-0 text-xs text-museum underline">
-                  地図
-                </button>
-              </li>
+          <ul className="mt-1 divide-y divide-border text-sm">
+            {halls.map((p) => (
+              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
             ))}
           </ul>
         )}
       </section>
-      <p className="text-[11px] text-muted">出典: {source}。社格などは名前と登録情報からの推定です。</p>
+
+      {castles.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">城・城跡</h3>
+          <ul className="mt-1 divide-y divide-border text-sm">
+            {castles.map((p) => (
+              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {infos.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">観光案内所</h3>
+          <ul className="mt-1 divide-y divide-border text-sm">
+            {infos.map((p) => (
+              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+            ))}
+          </ul>
+        </section>
+      )}
+      <section>
+        <h3 className="text-xs font-semibold tracking-wide text-muted">宿</h3>
+        {lodgings.length === 0 ? (
+          <p className="mt-1 text-sm text-muted">地帯とその隣の町には、地図に載った宿が見つかりませんでした。</p>
+        ) : (
+          <>
+            <p className="mt-1 text-[11px] text-muted">「ここに泊まる」で1泊2日の行程になります。泊まれるのは1か所で、選び直すと入れ替わります。</p>
+            <ul className="mt-1 divide-y divide-border text-sm">
+              {lodgings.map((p) => (
+                <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
+      <p className="text-[11px] text-muted">
+        出典: {source}。社格などは名前と登録情報からの推定です。「行ったことのある町」は、地帯の隣で訪問済みの町にある、まだ記録のない場所です。
+      </p>
     </div>
   );
 }

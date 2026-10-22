@@ -38,7 +38,8 @@ export function normalizeDeity(raw: string) {
 // 基礎情報の「主祭神」（なければ「祭神」）の欄から神名を取り出す
 export function parseDeities(wikitext: string): string[] {
   const field = (name: string) => {
-    const m = wikitext.match(new RegExp(`^\\|\\s*${name}\\s*=\\s*(.+)$`, "m"));
+    // 欄が空のとき次の行を拾わないよう、改行はまたがない
+    const m = wikitext.match(new RegExp(`^\\|[ \\t]*${name}[ \\t]*=[ \\t]*(.+)$`, "m"));
     return m?.[1]?.trim() ?? "";
   };
   const value = field("主祭神") || field("祭神");

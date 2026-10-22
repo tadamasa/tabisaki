@@ -56,7 +56,7 @@ export type Atlas = {
 
 export type Place = {
   id: string;
-  kind: "shrine" | "museum" | "info";
+  kind: "shrine" | "museum" | "art" | "castle" | "info" | "lodging";
   name: string;
   lat: number;
   lng: number;
@@ -65,12 +65,23 @@ export type Place = {
   reasons: string[];
   wikipedia: string | null;
   website: string | null;
+  // 空白地帯の外、隣の「行ったことのある町」にある場所
+  outside?: boolean;
+  // 社: 並び順の点数の内訳と、Wikipedia の基礎情報にある社格
+  basis?: { key: string; label: string; pts: number }[];
+  shakaku?: string[];
 };
 
 export type AreaPlaces = {
   areaId: string;
   anchors: (Place & { primer: { place: Place; km: number } | null; en: En | null })[];
   primers: Place[];
+  // 本命にもできる博物館・美術館（資料館を含む）
+  halls: Place[];
+  // 城・城跡
+  castles: Place[];
+  // 宿（旅館・ホテルなど）
+  lodgings: Place[];
   shrineCount: number;
   source: string;
 };
