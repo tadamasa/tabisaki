@@ -4,6 +4,7 @@ import maplibregl, { type FilterSpecification, type MapGeoJSONFeature } from "ma
 import { useEffect, useRef } from "react";
 import type { Origin } from "@/lib/origin";
 import { kmBetween } from "@/lib/origin";
+import { festivalNote } from "@/lib/places/festival";
 import type { TimedStop } from "@/lib/plan/itinerary";
 import type { AreaPlaces, Atlas, BlankArea, MuniProps, Place, Spot } from "@/lib/types";
 
@@ -14,6 +15,7 @@ type Props = {
   origin: Origin;
   selected: BlankArea | null;
   places: AreaPlaces | null;
+  trip: Date;
   route: { home: [number, number]; stops: TimedStop[] } | null;
   focus: Place | null;
   onSelectArea: (areaId: string | null) => void;
@@ -167,7 +169,7 @@ const routeData = (route: Props["route"]): import("geojson").FeatureCollection =
     : [],
 });
 
-export default function MapView({ atlas, areaIds, origin, selected, places, route, focus, onSelectArea, ...plan }: Props) {
+export default function MapView({ atlas, areaIds, origin, selected, places, trip, route, focus, onSelectArea, ...plan }: Props) {
   const { home } = atlas.summary;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -466,14 +468,17 @@ export default function MapView({ atlas, areaIds, origin, selected, places, rout
     if (!places) return;
     for (const p of [...places.primers, ...(places.halls ?? []), ...(places.castles ?? []), ...(places.lodgings ?? []), ...places.anchors]) {
       if (placeMarkersRef.current.has(p.id)) continue;
+      const festival = festivalNote(p.reisai, trip);
       const el = document.createElement("div");
-      el.className = `size-3.5 cursor-pointer rounded-full ring-2 ring-white shadow ${PLACE_BG[p.kind]}`;
+      // 旅の日の前後に例祭がある社は、印を大きく、金の縁で出す
+      el.className = `cursor-pointer rounded-full shadow ${PLACE_BG[p.kind]} ${festival ? "size-5 ring-[3px] ring-amber-400" : "size-3.5 ring-2 ring-white"}`;
       el.title = p.name;
       const content = document.createElement("div");
       const info = document.createElement("div");
       info.innerHTML =
         `<strong>${escapeHtml(p.name)}</strong><br>${PLACE_LABEL[p.kind]} ・ ${escapeHtml(p.town)}` +
         (p.shakaku?.length ? `<br>社格: ${p.shakaku.map(escapeHtml).join("・")}` : "") +
+        (p.reisai ? `<br>例祭: ${escapeHtml(p.reisai)}${festival ? ` <b style="color:#c2412d">🏮 ${festival}</b>` : ""}` : "") +
         (p.reasons.length ? `<br>${p.reasons.map(escapeHtml).join("・")}` : "") +
         (p.wikipedia ? `<br><a href="${escapeHtml(p.wikipedia)}" target="_blank" rel="noreferrer">Wikipedia</a>` : "") +
         (p.kind === "lodging" ? `<br><a href="${escapeHtml(innSearchLink(p))}" target="_blank" rel="noreferrer">空室・料金を調べる</a>` : "") +
@@ -486,7 +491,7 @@ export default function MapView({ atlas, areaIds, origin, selected, places, rout
       actionBoxesRef.current.set(p.id, { box, place: p, popup });
       placeMarkersRef.current.set(p.id, new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).setPopup(popup).addTo(map));
     }
-  }, [places]);
+  }, [places, trip]);
 
   // 行程の順路（自宅→各地点→自宅）を線と番号で出す。線は道ではなく、回る順の目安
   useEffect(() => {

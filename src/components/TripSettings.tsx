@@ -14,6 +14,9 @@ const MODES: { mode: Mode; icon: string }[] = [
 type Props = {
   origin: Origin;
   mode: Mode;
+  // 旅の日（YYYY-MM-DD）。前後に例祭がある社に印が付く
+  tripDate: string;
+  onDate: (d: string) => void;
   centers: ReturnType<typeof townCenters>;
   // null で自宅に戻す
   onOrigin: (o: Origin | null) => void;
@@ -24,7 +27,7 @@ const chip = (on: boolean) =>
   `min-h-9 rounded-full border px-3 text-sm ${on ? "border-foreground bg-foreground text-surface" : "border-border text-foreground hover:bg-background"}`;
 
 // どこから出るか（自宅・今いる場所・探した地名）と、何で回るか
-export default function TripSettings({ origin, mode, centers, onOrigin, onMode }: Props) {
+export default function TripSettings({ origin, mode, tripDate, onDate, centers, onOrigin, onMode }: Props) {
   const [searching, setSearching] = useState(false);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Origin[] | null>(null);
@@ -145,6 +148,16 @@ export default function TripSettings({ origin, mode, centers, onOrigin, onMode }
           </button>
         ))}
       </div>
+      <label className="flex items-center gap-1.5">
+        <span className="mr-1 text-xs text-muted">旅の日</span>
+        <input
+          type="date"
+          value={tripDate}
+          onChange={(e) => onDate(e.target.value)}
+          className="min-h-9 rounded border border-border bg-surface px-2 text-foreground"
+        />
+        <span className="text-[11px] text-muted">前後3日に例祭がある社に🏮</span>
+      </label>
     </div>
   );
 }

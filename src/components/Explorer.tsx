@@ -27,6 +27,20 @@ const DEFAULT_START = 8 * 60;
 // 出発地（自宅以外にしたとき）と移動手段も、この端末に覚えておく
 const ORIGIN_KEY = "tabisaki:origin";
 const MODE_KEY = "tabisaki:mode";
+const DATE_KEY = "tabisaki:date";
+
+// 旅の日の既定は、次の土曜（今日が土曜なら今日）
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function nextSaturday() {
+  const d = new Date();
+  d.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
+  return ymd(d);
+}
+// 覚えていた日が過ぎていたら、既定に戻す
+const initialDate = () => {
+  const saved = readJson<string | null>(DATE_KEY, null);
+  return saved && saved >= ymd(new Date()) ? saved : nextSaturday();
+};
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -90,6 +104,16 @@ export default function Explorer() {
   const [plans, setPlans] = useState<Record<string, SavedPlan>>(() => (typeof window === "undefined" ? {} : readPlans()));
   // null なら自宅から出る
   const [away, setAway] = useState<Origin | null>(() => (typeof window === "undefined" ? null : readJson<Origin | null>(ORIGIN_KEY, null)));
+  const [tripDate, setTripDate] = useState<string>(() => (typeof window === "undefined" ? nextSaturday() : initialDate()));
+  const chooseDate = (d: string) => {
+    if (!d) return;
+    setTripDate(d);
+    writeJson(DATE_KEY, d);
+  };
+  const trip = useMemo(() => {
+    const [y, m, d] = tripDate.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }, [tripDate]);
   const [mode, setMode] = useState<Mode>(() => (typeof window === "undefined" ? "car" : readJson<Mode>(MODE_KEY, "car")));
   const chooseOrigin = (o: Origin | null) => {
     setAway(o);
@@ -275,6 +299,7 @@ export default function Explorer() {
             origin={origin}
             selected={selected}
             places={loaded}
+            trip={trip}
             route={plan && plan.stops.length > 0 ? { home: from, stops: plan.stops } : null}
             focus={focus}
             onSelectArea={selectArea}
@@ -338,6 +363,9 @@ export default function Explorer() {
                     origin={origin}
                     mode={mode}
                     onMode={chooseMode}
+                    tripDate={tripDate}
+                    trip={trip}
+                    onDate={chooseDate}
                     onChange={(next) => savePlan(next)}
                     onStart={(min) => savePlan(stops, min)}
                     onStart2={(min) => savePlan(stops, start, min)}
@@ -346,12 +374,13 @@ export default function Explorer() {
                     onFocus={setFocus}
                   />
                 ) : (
-                  <AreaPlacesPanel state={selectedPlaces} onRetry={() => retryPlaces(selected.id)} onFocus={setFocus} planIds={planIds} anchorId={anchorId} onToggle={togglePlace} onMakeAnchor={makeAnchor} />
+                  <AreaPlacesPanel state={selectedPlaces} trip={trip} onRetry={() => retryPlaces(selected.id)} onFocus={setFocus} planIds={planIds} anchorId={anchorId} onToggle={togglePlace} onMakeAnchor={makeAnchor} />
                 )
               ) : (
                 <>
                   <AreaPlacesPanel
                     state={selectedPlaces}
+                    trip={trip}
                     planIds={planIds}
                     anchorId={anchorId}
                     onToggle={togglePlace}
@@ -408,34 +437,42 @@ export default function Explorer() {
               {data && (
                 <p className="mt-1 text-sm text-muted">
                   記録のある町 <strong className="text-foreground">{data.summary.visited}</strong> /{" "}
-                  {data.summary.municipalities.toLocaleString()} ・ 100km圏の未訪問{" "}
-                  <strong className="text-foreground">{data.summary.unvisitedByBand[0].count}</strong> 町
+                  {data.summary.municipalities.toLocaleString()} ・ {origin.kind === "home" ? "" : `${origin.label}から`}
+                  {maxKm < 5000 ? `${maxKm}km圏` : "全国"}の未訪問{" "}
+                  <strong className="text-foreground">{near?.towns.filter((t) => !t.visited && t.km < maxKm).length}</strong> 町
                 </p>
               )}
-              <TripSettings
-                origin={origin}
-                mode={mode}
-                centers={centers}
-                onOrigin={chooseOrigin}
-                onMode={chooseMode}
-              />
-              <div className="mt-3 flex gap-2" role="group" aria-label={`${origin.label}からの距離`}>
-                {DISTANCES[mode].map((d) => (
-                  <button
-                    key={d.km}
-                    type="button"
-                    onClick={() => setMaxKm(d.km)}
-                    aria-pressed={maxKm === d.km}
-                    className={`min-h-9 rounded-full border px-3 text-sm ${
-                      maxKm === d.km
-                        ? "border-area bg-area text-white"
-                        : "border-border text-foreground hover:bg-background"
-                    }`}
-                  >
-                    {d.label}
-                  </button>
-                ))}
-              </div>
+              {/* 出発地・移動手段・旅の日はこの端末に覚えた値を使うので、地図のデータが届いて（ブラウザで）から出す */}
+              {data && (
+                <>
+                  <TripSettings
+                    origin={origin}
+                    mode={mode}
+                    tripDate={tripDate}
+                    onDate={chooseDate}
+                    centers={centers}
+                    onOrigin={chooseOrigin}
+                    onMode={chooseMode}
+                  />
+                  <div className="mt-3 flex gap-2" role="group" aria-label={`${origin.label}からの距離`}>
+                    {DISTANCES[mode].map((d) => (
+                      <button
+                        key={d.km}
+                        type="button"
+                        onClick={() => setMaxKm(d.km)}
+                        aria-pressed={maxKm === d.km}
+                        className={`min-h-9 rounded-full border px-3 text-sm ${
+                          maxKm === d.km
+                            ? "border-area bg-area text-white"
+                            : "border-border text-foreground hover:bg-background"
+                        }`}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                 <li className="flex items-center gap-1.5">
                   <span className="inline-block size-3 rounded-sm bg-visited/60" />

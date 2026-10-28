@@ -73,7 +73,7 @@ async function getOsm(bbox: number[]) {
 
 // 記事の祭神・社格も同じく、記録の読み直しでは捨てない。
 // 記事から読む項目を増やしたら WIKI_VERSION を上げて、古い覚えを使わないようにする
-const WIKI_VERSION = 2;
+const WIKI_VERSION = 3;
 async function getWikiShrines(version: number, titles: string[]) {
   "use cache: remote";
   cacheLife("weeks");
@@ -174,11 +174,13 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
   // 記事の社格を点数に足して並べ直す（名前などですでに数えたものは重ねない）。隣の町の社は後ろのまま
   const anchors = ranked.anchors
     .map((a) => {
-      const shakaku = pageOf(a)?.shakaku ?? [];
+      const page = pageOf(a);
+      const shakaku = page?.shakaku ?? [];
       const extra = shakakuBasis(shakaku, new Set(a.basis?.map((b) => b.key)));
       return {
         ...a,
         shakaku,
+        ...(page?.reisai ? { reisai: page.reisai } : {}),
         basis: [...(a.basis ?? []), ...extra],
         score: a.score + extra.reduce((s, b) => s + b.pts, 0),
       };

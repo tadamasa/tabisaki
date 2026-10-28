@@ -17,6 +17,7 @@ import {
   googleMapsRoutes,
 } from "@/lib/plan/itinerary";
 import type { Origin } from "@/lib/origin";
+import { FestivalBadge } from "./AreaPlacesPanel";
 import type { Place } from "@/lib/types";
 
 const ROLE_LABEL: Record<Role, string> = { primer: "予習", anchor: "本命", kin: "ゆかり", extra: "立ち寄り", stay: "泊" };
@@ -53,6 +54,9 @@ type Props = {
   origin: Origin;
   mode: Mode;
   onMode: (m: Mode) => void;
+  tripDate: string;
+  trip: Date;
+  onDate: (d: string) => void;
   onChange: (stops: Stop[]) => void;
   onStart: (min: number) => void;
   // 2日目に宿を出る時刻
@@ -142,7 +146,7 @@ function OrderRules({
   );
 }
 
-export default function ItineraryPanel({ plan, home, origin, mode, onMode, onChange, onStart, onStart2, onReset, onOptimize, onFocus }: Props) {
+export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripDate, trip, onDate, onChange, onStart, onStart2, onReset, onOptimize, onFocus }: Props) {
   const stops: Stop[] = plan.stops.map(({ place, role, linkNext, before }) => ({ place, role, linkNext, before }));
   const nameOf = new Map(stops.map((s, i) => [s.place.id, { name: s.place.name, at: i }]));
   // つないだ地点はかたまりごと動かす
@@ -184,18 +188,6 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, onCha
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-sm font-semibold">{plan.days > 1 ? `${plan.days - 1}泊${plan.days}日の行程（目安）` : "日帰りの行程（目安）"}</h3>
         <span className="flex items-center gap-3 whitespace-nowrap text-xs">
-          <select
-            value={mode}
-            onChange={(e) => onMode(e.target.value as Mode)}
-            aria-label="移動手段"
-            className="rounded border border-border bg-surface px-1 py-0.5 text-xs text-foreground"
-          >
-            {(Object.keys(MODE_LABEL) as Mode[]).map((m) => (
-              <option key={m} value={m}>
-                {MODE_LABEL[m]}
-              </option>
-            ))}
-          </select>
           {stops.length > 1 && (
             <button type="button" onClick={optimize} className="text-museum underline">
               近い順に並べ直す
@@ -205,6 +197,32 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, onCha
             おすすめに戻す
           </button>
         </span>
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted">
+        <label className="flex items-center gap-1">
+          旅の日
+          <input
+            type="date"
+            value={tripDate}
+            onChange={(e) => onDate(e.target.value)}
+            className="rounded border border-border bg-surface px-1 py-0.5 text-xs text-foreground"
+          />
+        </label>
+        <label className="flex items-center gap-1">
+          移動
+          <select
+            value={mode}
+            onChange={(e) => onMode(e.target.value as Mode)}
+            className="rounded border border-border bg-surface px-1 py-0.5 text-xs text-foreground"
+          >
+            {(Object.keys(MODE_LABEL) as Mode[]).map((m) => (
+              <option key={m} value={m}>
+                {MODE_LABEL[m]}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {notice && (
@@ -240,6 +258,7 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, onCha
                       {s.place.name}
                     </button>
                     <span className="ml-1 text-xs text-muted">{s.place.town}</span>
+                    <FestivalBadge place={s.place} trip={trip} />
                     <OrderRules
                       stop={s}
                       at={i}

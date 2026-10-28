@@ -1,6 +1,8 @@
 "use client";
 
+import { festivalNote } from "@/lib/places/festival";
 import { TOWN_AREA_PREFIX } from "@/lib/townArea";
+import AreaNews from "./AreaNews";
 import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
@@ -69,12 +71,27 @@ function RankNote({ place }: { place: Place }) {
     <p className="mt-1.5 text-xs text-muted">
       <span className="font-medium text-foreground">社格</span>{" "}
       {place.shakaku?.length ? place.shakaku.join("・") : "記事に記載が見つかりませんでした"}
+      {place.reisai && (
+        <>
+          {" "}
+          ・ <span className="font-medium text-foreground">例祭</span> {place.reisai}
+        </>
+      )}
     </p>
   );
 }
 
+// 旅の日の前後に例祭がある社の印
+export function FestivalBadge({ place, trip }: { place: Place; trip: Date }) {
+  const note = festivalNote(place.reisai, trip);
+  if (!note) return null;
+  return <span className="ml-1.5 inline-block rounded-full bg-shrine px-1.5 text-[11px] font-medium text-white">🏮 {note}</span>;
+}
+
 type Props = {
   state: PlacesState;
+  // 旅の日。前後に例祭がある社に印を付ける
+  trip: Date;
   onRetry: () => void;
   onFocus: (p: Place) => void;
   // 行程の編集
@@ -147,7 +164,7 @@ function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFoc
   );
 }
 
-export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Props) {
+export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan }: Props) {
   if (!state)
     return (
       <p className="mt-3 text-sm text-muted">
@@ -167,8 +184,26 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
 
   const { anchors, primers, halls = [], castles = [], lodgings = [], shrineCount, source } = state;
   const infos = primers.filter((p) => p.kind === "info");
+  const festive = anchors.filter((a) => festivalNote(a.reisai, trip));
   return (
     <div className="mt-4 space-y-4">
+      {festive.length > 0 && (
+        <section className="rounded-lg border border-shrine/40 bg-shrine/5 p-2.5">
+          <h3 className="text-xs font-semibold tracking-wide text-shrine">旅の日の前後に例祭がある社</h3>
+          <ul className="mt-1 space-y-1 text-sm">
+            {festive.map((a) => (
+              <li key={a.id} className="flex items-start justify-between gap-2">
+                <span>
+                  <PlaceName place={a} />
+                  <FestivalBadge place={a} trip={trip} />
+                  <span className="ml-1.5 text-xs text-muted">例祭 {a.reisai}</span>
+                </span>
+                <PlanButtons place={a} {...plan} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section>
         <h3 className="text-xs font-semibold tracking-wide text-muted">
           神社（{state.areaId.startsWith(TOWN_AREA_PREFIX) ? "この町" : "地帯"}の {shrineCount} 社から）
@@ -184,6 +219,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
                     <span className="mr-1.5 inline-block size-2 rounded-full bg-shrine" />
                     <PlaceName place={a} />
                     <span className="ml-1.5 text-xs text-muted">{a.town}</span>
+                    <FestivalBadge place={a} trip={trip} />
                   </span>
                   <button type="button" onClick={() => onFocus(a)} className="shrink-0 text-xs text-museum underline">
                     地図
@@ -267,8 +303,9 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
           </>
         )}
       </section>
+      <AreaNews areaId={state.areaId} />
       <p className="text-[11px] text-muted">
-        出典: {source}。社格などは名前と登録情報からの推定です。「行ったことのある町」は、地帯の隣で訪問済みの町にある、まだ記録のない場所です。
+        出典: {source}。例祭は Wikipedia の基礎情報から（旧暦の日付は数えていません）。社格などは名前と登録情報からの推定です。「行ったことのある町」は、地帯の隣で訪問済みの町にある、まだ記録のない場所です。
       </p>
     </div>
   );
