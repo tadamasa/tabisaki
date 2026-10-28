@@ -2,23 +2,18 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_START2, type Role, type Stop, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { DEFAULT_START2, type Mode, type Role, type Stop, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { DISTANCES, type Origin, fromOrigin, townCenters } from "@/lib/origin";
 import { townArea } from "@/lib/townArea";
 import type { AreaPlaces, Atlas, Place } from "@/lib/types";
 import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
 import ItineraryPanel from "./ItineraryPanel";
+import TripSettings from "./TripSettings";
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
   loading: () => <div className="grid h-full place-items-center text-muted">地図を読み込み中…</div>,
 });
-
-const DISTANCES = [
-  { km: 100, label: "100km" },
-  { km: 200, label: "200km" },
-  { km: 300, label: "300km" },
-  { km: 5000, label: "全国" },
-];
 
 const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
@@ -29,21 +24,29 @@ type SavedPlan = { stops: [string, Role, (0 | 1)?, string[]?][]; start: number; 
 const PLANS_KEY = "tabisaki:plans";
 const DEFAULT_START = 8 * 60;
 
-function readPlans(): Record<string, SavedPlan> {
+// 出発地（自宅以外にしたとき）と移動手段も、この端末に覚えておく
+const ORIGIN_KEY = "tabisaki:origin";
+const MODE_KEY = "tabisaki:mode";
+
+function readJson<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(localStorage.getItem(PLANS_KEY) ?? "{}");
+    return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback;
   } catch {
-    return {};
+    return fallback;
   }
 }
 
-function writePlans(plans: Record<string, SavedPlan>) {
+function writeJson(key: string, value: unknown) {
   try {
-    localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // 保存できない環境では、開いている間だけ覚える
   }
 }
+
+const readPlans = () => readJson<Record<string, SavedPlan>>(PLANS_KEY, {});
+const writePlans = (plans: Record<string, SavedPlan>) => writeJson(PLANS_KEY, plans);
 
 const AREA_PLACE = (ap: AreaPlaces) =>
   new Map<string, Place>(
@@ -52,6 +55,7 @@ const AREA_PLACE = (ap: AreaPlaces) =>
 
 // 開きそうな地帯の候補を先に取っておく数。OpenStreetMap に一度にたくさん問い合わせないよう、1つずつ順に取る
 const PREFETCH_COUNT = 3;
+const NEAR_TOWNS = 8;
 
 async function fetchPlaces(areaId: string): Promise<NonNullable<PlacesState>> {
   try {
@@ -74,13 +78,29 @@ export default function Explorer() {
   const [data, setData] = useState<Atlas | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [maxKm, setMaxKm] = useState(100);
+  const [maxKm, setMaxKm] = useState(() => {
+    const m = typeof window === "undefined" ? "car" : readJson<Mode>(MODE_KEY, "car");
+    return DISTANCES[m][m === "car" ? 0 : 1].km;
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // 地帯ごとの神社・資料館の候補。開いたときに一度だけ取りに行く
   const [places, setPlaces] = useState<Record<string, NonNullable<PlacesState>>>({});
   const [focus, setFocus] = useState<Place | null>(null);
   const [tab, setTab] = useState<"plan" | "places">("plan");
   const [plans, setPlans] = useState<Record<string, SavedPlan>>(() => (typeof window === "undefined" ? {} : readPlans()));
+  // null なら自宅から出る
+  const [away, setAway] = useState<Origin | null>(() => (typeof window === "undefined" ? null : readJson<Origin | null>(ORIGIN_KEY, null)));
+  const [mode, setMode] = useState<Mode>(() => (typeof window === "undefined" ? "car" : readJson<Mode>(MODE_KEY, "car")));
+  const chooseOrigin = (o: Origin | null) => {
+    setAway(o);
+    writeJson(ORIGIN_KEY, o);
+  };
+  // 移動手段を変えたら、距離の絞り込みもその手段の幅に合わせる
+  const chooseMode = (m: Mode) => {
+    setMode(m);
+    writeJson(MODE_KEY, m);
+    if (!DISTANCES[m].some((d) => d.km === maxKm)) setMaxKm(DISTANCES[m][1]?.km ?? DISTANCES[m][0].km);
+  };
 
   const load = () => fetchAtlas().then(setData, (e: Error) => setError(e.message));
 
@@ -101,11 +121,16 @@ export default function Explorer() {
   };
   // 候補はその場で OpenStreetMap に問い合わせるので、はじめて開く地帯は待たされる。
   // 地図を出したら、近い地帯から順に裏で取っておく
+  const home = useMemo(() => data?.summary.home ?? ([135.5157, 34.7617] as [number, number]), [data]);
+  const origin = useMemo<Origin>(() => away ?? { kind: "home", label: "自宅", at: home }, [away, home]);
+  const centers = useMemo(() => (data ? townCenters(data) : []), [data]);
+  // 出発地からの距離で、地帯と町を近い順に並べ直す
+  const near = useMemo(() => (data ? fromOrigin(data, centers, origin.at) : null), [data, centers, origin]);
+  const areas = useMemo(() => (near?.areas ?? []).filter((a) => a.km < maxKm), [near, maxKm]);
   useEffect(() => {
-    if (!data) return;
     let cancelled = false;
     (async () => {
-      for (const a of data.areas.filter((x) => x.km < maxKm).slice(0, PREFETCH_COUNT)) {
+      for (const a of areas.slice(0, PREFETCH_COUNT)) {
         if (cancelled) return;
         await loadPlaces(a.id);
       }
@@ -113,7 +138,7 @@ export default function Explorer() {
     return () => {
       cancelled = true;
     };
-  }, [data, maxKm]);
+  }, [areas]);
   // 一覧で指を置いた・カーソルを乗せた地帯も先に取りに行く
   const warm = (areaId: string) => {
     if (!places[areaId]) loadPlaces(areaId);
@@ -148,14 +173,16 @@ export default function Explorer() {
     }
   };
 
-  const areas = useMemo(
-    () => (data?.areas ?? []).filter((a) => a.km < maxKm),
-    [data, maxKm],
-  );
   // 地図の町名から、地帯に入っていない町を1つだけ開くこともある
-  const selected = data && selectedId ? (data.areas.find((a) => a.id === selectedId) ?? townArea(data, selectedId)) : null;
+  const townHere = (id: string) => {
+    const t = townArea(data!, id);
+    if (!t || !near) return t;
+    const km = near.km.get(t.towns[0].id) ?? t.km;
+    return { ...t, km, towns: t.towns.map((x) => ({ ...x, km })) };
+  };
+  const selected = data && selectedId ? (near?.areas.find((a) => a.id === selectedId) ?? townHere(selectedId)) : null;
   const selectedPlaces = selectedId ? places[selectedId] : undefined;
-  const home = data?.summary.home ?? ([135.5157, 34.7617] as [number, number]);
+  const from = origin.at;
   const loaded = selectedPlaces && !("error" in selectedPlaces) ? selectedPlaces : null;
 
   // 保存した行程があればそれを、なければ本命の候補の一番目から組んだ行程を出す
@@ -169,8 +196,8 @@ export default function Explorer() {
           const place = AREA_PLACE(loaded).get(id);
           return place ? [{ place, role, linkNext: link === 1, before }] : [];
         })
-      : suggestPlan(loaded, home, undefined, start);
-  const plan = loaded ? schedule(stops, home, start, start2) : null;
+      : suggestPlan(loaded, from, undefined, start, mode);
+  const plan = loaded ? schedule(stops, from, start, start2, mode) : null;
 
   const savePlan = (next: Stop[] | null, nextStart = start, nextStart2 = start2) => {
     if (!loaded) return;
@@ -194,17 +221,17 @@ export default function Explorer() {
     if (stops.some((s) => s.place.id === p.id)) return savePlan(without(stops, (s) => s.place.id === p.id));
     const role = roleFor(p, stops);
     const base = role === "stay" ? without(stops, (s) => s.role === "stay") : stops;
-    savePlan(optimizeOrder([...base, { place: p, role }], home, start, start2));
+    savePlan(optimizeOrder([...base, { place: p, role }], from, start, start2, mode));
   };
   // 本命を選び直しても、決めてある宿はそのまま残す
   const makeAnchor = (p: Place) => {
     if (!loaded) return;
     const stay = stops.find((s) => s.role === "stay");
-    const next = suggestPlan(loaded, home, p.id, start);
-    savePlan(stay ? optimizeOrder([...next, { place: stay.place, role: "stay" }], home, start, start2) : next);
+    const next = suggestPlan(loaded, from, p.id, start, mode);
+    savePlan(stay ? optimizeOrder([...next, { place: stay.place, role: "stay" }], from, start, start2, mode) : next);
   };
   const reorder = () => {
-    const next = optimizeOrder(stops, home, start, start2);
+    const next = optimizeOrder(stops, from, start, start2, mode);
     const changed = next.some((s, i) => s.place.id !== stops[i].place.id);
     savePlan(next);
     return changed;
@@ -244,10 +271,11 @@ export default function Explorer() {
         {data ? (
           <MapView
             atlas={data}
-            maxKm={maxKm}
+            areaIds={areas.map((a) => a.id)}
+            origin={origin}
             selected={selected}
             places={loaded}
-            route={plan && plan.stops.length > 0 ? { home, stops: plan.stops } : null}
+            route={plan && plan.stops.length > 0 ? { home: from, stops: plan.stops } : null}
             focus={focus}
             onSelectArea={selectArea}
             planIds={planIds}
@@ -306,7 +334,10 @@ export default function Explorer() {
                 plan ? (
                   <ItineraryPanel
                     plan={plan}
-                    home={home}
+                    home={from}
+                    origin={origin}
+                    mode={mode}
+                    onMode={chooseMode}
                     onChange={(next) => savePlan(next)}
                     onStart={(min) => savePlan(stops, min)}
                     onStart2={(min) => savePlan(stops, start, min)}
@@ -381,8 +412,15 @@ export default function Explorer() {
                   <strong className="text-foreground">{data.summary.unvisitedByBand[0].count}</strong> 町
                 </p>
               )}
-              <div className="mt-3 flex gap-2" role="group" aria-label="自宅からの距離">
-                {DISTANCES.map((d) => (
+              <TripSettings
+                origin={origin}
+                mode={mode}
+                centers={centers}
+                onOrigin={chooseOrigin}
+                onMode={chooseMode}
+              />
+              <div className="mt-3 flex gap-2" role="group" aria-label={`${origin.label}からの距離`}>
+                {DISTANCES[mode].map((d) => (
                   <button
                     key={d.km}
                     type="button"
@@ -456,6 +494,28 @@ export default function Explorer() {
                   </li>
                 ))}
               </ol>
+              {/* 出先や、歩き・自転車では、行ったことのある町にもまだの場所があるので、近い町をそのまま開けるようにする */}
+              {(origin.kind !== "home" || mode === "walk" || mode === "bike") && near && (
+                <>
+                  <h2 className="px-4 pb-1 pt-4 text-xs font-semibold tracking-wide text-muted">{origin.label}のまわりの町</h2>
+                  <ul className="flex flex-wrap gap-1.5 px-4 pb-4">
+                    {near.towns.slice(0, NEAR_TOWNS).map((t) => (
+                      <li key={t.id}>
+                        <button
+                          type="button"
+                          onClick={() => selectArea(t.area && t.area !== "null" ? t.area : `town-${t.id}`)}
+                          className={`inline-flex min-h-9 items-center rounded-full border px-3 text-sm hover:bg-background ${t.visited ? "border-visited/50" : "border-area/60"}`}
+                        >
+                          {t.short}
+                          <span className="ml-1 text-xs text-muted">
+                            {t.km}km{t.visited ? " ・ 行った町" : ""}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </div>
           </>
         )}

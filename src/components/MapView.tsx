@@ -2,12 +2,16 @@
 
 import maplibregl, { type FilterSpecification, type MapGeoJSONFeature } from "maplibre-gl";
 import { useEffect, useRef } from "react";
+import type { Origin } from "@/lib/origin";
+import { kmBetween } from "@/lib/origin";
 import type { TimedStop } from "@/lib/plan/itinerary";
 import type { AreaPlaces, Atlas, BlankArea, MuniProps, Place, Spot } from "@/lib/types";
 
 type Props = {
   atlas: Atlas;
-  maxKm: number;
+  // 出発地からの距離で絞り込んだ地帯
+  areaIds: string[];
+  origin: Origin;
   selected: BlankArea | null;
   places: AreaPlaces | null;
   route: { home: [number, number]; stops: TimedStop[] } | null;
@@ -54,11 +58,7 @@ const PLACE_BG: Record<Place["kind"], string> = {
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-const areaFilter = (maxKm: number): FilterSpecification => [
-  "all",
-  ["to-boolean", ["get", "area"]],
-  ["<", ["get", "km"], maxKm],
-];
+const areaFilter = (areaIds: string[]): FilterSpecification => ["in", ["get", "area"], ["literal", areaIds]];
 
 // この縮尺より寄ったら、見えている範囲のすべての市町村に名前を出す（開いた地帯の町はいつでも出す）
 const ALL_TOWN_LABEL_ZOOM = 8.5;
@@ -83,11 +83,13 @@ function label(text: string, kind: "town" | "visited-town" | "other-town" | "spo
 }
 
 // 市町村の吹き出し。まだの町は地帯ごと、行ったことのある町はその町だけの候補を読み込める
-function muniPopup(p: MuniProps, [lng, lat]: [number, number], onLoad: (areaId: string) => void) {
+function muniPopup(p: MuniProps, [lng, lat]: [number, number], origin: () => Origin, onLoad: (areaId: string) => void) {
   const status = p.visited ? `訪問 ${p.visits} 件 ・ 最後 ${formatDate(p.last)}` : "まだ記録がありません";
   const content = document.createElement("div");
   const info = document.createElement("div");
-  info.innerHTML = `<strong>${escapeHtml(p.name)}</strong><br>${status}<br>自宅から約 ${p.km} km${mapLinks(lng, lat, p.name)}`;
+  const o = origin();
+  const km = Math.round(kmBetween(o.at, [lng, lat]));
+  info.innerHTML = `<strong>${escapeHtml(p.name)}</strong><br>${status}<br>${escapeHtml(o.label)}から約 ${km} km${mapLinks(lng, lat, p.name)}`;
   const area = p.area && p.area !== "null" ? p.area : null;
   const b = document.createElement("button");
   b.type = "button";
@@ -165,7 +167,7 @@ const routeData = (route: Props["route"]): import("geojson").FeatureCollection =
     : [],
 });
 
-export default function MapView({ atlas, maxKm, selected, places, route, focus, onSelectArea, ...plan }: Props) {
+export default function MapView({ atlas, areaIds, origin, selected, places, route, focus, onSelectArea, ...plan }: Props) {
   const { home } = atlas.summary;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -189,6 +191,11 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
       if (popup.isOpen()) renderActions(box, place, plan);
     }
   });
+  const originRef = useRef(origin);
+  useEffect(() => {
+    originRef.current = origin;
+  }, [origin]);
+  const originMarkerRef = useRef<maplibregl.Marker | null>(null);
   const onSelectRef = useRef(onSelectArea);
   useEffect(() => {
     onSelectRef.current = onSelectArea;
@@ -220,7 +227,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         p.id,
         new maplibregl.Marker({ element: el })
           .setLngLat(at)
-          .setPopup(muniPopup(p, at, (id) => onSelectRef.current(id)))
+          .setPopup(muniPopup(p, at, () => originRef.current, (id) => onSelectRef.current(id)))
           .addTo(map),
       );
     }
@@ -267,7 +274,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         id: "muni-area",
         type: "fill",
         source: "munis",
-        filter: areaFilter(maxKm),
+        filter: areaFilter(areaIds),
         paint: { "fill-color": "#d9822b", "fill-opacity": 0.14 },
       });
       map.addLayer({
@@ -398,11 +405,30 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
     if (!map) return;
     const apply = () => {
       if (!map.getLayer("muni-area")) return;
-      map.setFilter("muni-area", areaFilter(maxKm));
+      map.setFilter("muni-area", areaFilter(areaIds));
     };
     if (map.getLayer("muni-area")) apply();
     else map.once("load", apply);
-  }, [maxKm]);
+    // 中身が同じなら掛け直さない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areaIds.join(",")]);
+
+  // 自宅以外から出るときは、出発地に印を立てて、そこへ寄る
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    originMarkerRef.current?.remove();
+    originMarkerRef.current = null;
+    if (origin.kind === "home") return;
+    const el = document.createElement("div");
+    el.className = "grid size-7 place-items-center rounded-full bg-foreground text-sm shadow ring-2 ring-white";
+    el.textContent = origin.kind === "here" ? "📍" : "🏨";
+    originMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat(origin.at)
+      .setPopup(new maplibregl.Popup({ offset: 16 }).setText(`出発地: ${origin.label}`))
+      .addTo(map);
+    if (!selectedRef.current) map.flyTo({ center: origin.at, zoom: Math.max(map.getZoom(), 9) });
+  }, [origin]);
 
   useEffect(() => {
     const map = mapRef.current;

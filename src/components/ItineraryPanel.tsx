@@ -1,7 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CHECK_IN, DAY_END, INN_BY, MAPS_WAYPOINT_MAX, type Plan, blocksOf, type Role, type Stop, clock, googleMapsRoutes } from "@/lib/plan/itinerary";
+import {
+  CHECK_IN,
+  DAY_END,
+  INN_BY,
+  MAPS_WAYPOINT_MAX,
+  MODE_LABEL,
+  type Mode,
+  type Plan,
+  blocksOf,
+  type Role,
+  type Stop,
+  clock,
+  googleMapsLeg,
+  googleMapsRoutes,
+} from "@/lib/plan/itinerary";
+import type { Origin } from "@/lib/origin";
 import type { Place } from "@/lib/types";
 
 const ROLE_LABEL: Record<Role, string> = { primer: "予習", anchor: "本命", kin: "ゆかり", extra: "立ち寄り", stay: "泊" };
@@ -35,6 +50,9 @@ function TimeSelect({ value, times, label, onChange }: { value: number; times: n
 type Props = {
   plan: Plan;
   home: [number, number];
+  origin: Origin;
+  mode: Mode;
+  onMode: (m: Mode) => void;
   onChange: (stops: Stop[]) => void;
   onStart: (min: number) => void;
   // 2日目に宿を出る時刻
@@ -45,11 +63,18 @@ type Props = {
   onFocus: (p: Place) => void;
 };
 
-// 地点のあいだの移動。地点どうしのあいだでは、2か所をつなぐボタンも出す
-function Drive({ min, link }: { min: number; link?: { on: boolean; toggle: () => void } }) {
+// 地点のあいだの移動。地点どうしのあいだでは、2か所をつなぐボタンも出す。電車の区間には乗換案内を添える
+function Drive({ min, by, transit, link }: { min: number; by: Mode; transit?: string; link?: { on: boolean; toggle: () => void } }) {
   return (
-    <li className="flex items-center gap-2 py-0.5 pl-6 text-[11px] text-muted">
-      <span className={link?.on ? "border-l-2 border-area pl-2" : ""}>車で約 {min} 分</span>
+    <li className="flex flex-wrap items-center gap-x-2 py-0.5 pl-6 text-[11px] text-muted">
+      <span className={link?.on ? "border-l-2 border-area pl-2" : ""}>
+        {MODE_LABEL[by]}で約 {min} 分
+      </span>
+      {transit && (
+        <a href={transit} target="_blank" rel="noreferrer" className="text-museum underline">
+          乗換を調べる
+        </a>
+      )}
       {link && (
         <button
           type="button"
@@ -117,7 +142,7 @@ function OrderRules({
   );
 }
 
-export default function ItineraryPanel({ plan, home, onChange, onStart, onStart2, onReset, onOptimize, onFocus }: Props) {
+export default function ItineraryPanel({ plan, home, origin, mode, onMode, onChange, onStart, onStart2, onReset, onOptimize, onFocus }: Props) {
   const stops: Stop[] = plan.stops.map(({ place, role, linkNext, before }) => ({ place, role, linkNext, before }));
   const nameOf = new Map(stops.map((s, i) => [s.place.id, { name: s.place.name, at: i }]));
   // つないだ地点はかたまりごと動かす
@@ -143,15 +168,34 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onStart2
     const t = setTimeout(() => setNotice(null), 3000);
     return () => clearTimeout(t);
   }, [notice]);
-  const optimize = () => setNotice(onOptimize() ? "運転がいちばん短くなる順に並べ直しました" : "すでに運転がいちばん短い順です");
-  const routes = googleMapsRoutes(stops, home);
+  const optimize = () => setNotice(onOptimize() ? "移動がいちばん短くなる順に並べ直しました" : "すでに移動がいちばん短い順です");
+  // 電車は経由地を渡せないので、区間ごとに乗換案内を開く
+  const routes = mode === "train" ? [] : googleMapsRoutes(stops, home, mode);
+  const transitLink = (i: number) => {
+    const from = i === 0 ? home : ([stops[i - 1].place.lng, stops[i - 1].place.lat] as [number, number]);
+    const to = i === stops.length ? home : ([stops[i].place.lng, stops[i].place.lat] as [number, number]);
+    return googleMapsLeg(from, to, "train");
+  };
+  const legBy = (by: Mode, i: number) => (by === "train" ? transitLink(i) : undefined);
   const homeOver = Math.max(0, plan.home - DAY_END);
 
   return (
     <section className="rounded-lg border border-shrine/30 bg-shrine/5 p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-sm font-semibold">{plan.days > 1 ? `${plan.days - 1}泊${plan.days}日の行程（目安）` : "日帰りの行程（目安）"}</h3>
-        <span className="flex gap-3 whitespace-nowrap text-xs">
+        <span className="flex items-center gap-3 whitespace-nowrap text-xs">
+          <select
+            value={mode}
+            onChange={(e) => onMode(e.target.value as Mode)}
+            aria-label="移動手段"
+            className="rounded border border-border bg-surface px-1 py-0.5 text-xs text-foreground"
+          >
+            {(Object.keys(MODE_LABEL) as Mode[]).map((m) => (
+              <option key={m} value={m}>
+                {MODE_LABEL[m]}
+              </option>
+            ))}
+          </select>
           {stops.length > 1 && (
             <button type="button" onClick={optimize} className="text-museum underline">
               近い順に並べ直す
@@ -177,13 +221,13 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onStart2
             <label className="flex items-center gap-1 text-muted">
               {plan.days > 1 && <span className="mr-1 text-xs font-semibold text-foreground">1日目</span>}
               <TimeSelect value={plan.start} times={START_TIMES} label="出発時刻" onChange={onStart} />
-              自宅を出る
+              {origin.label}を出る
             </label>
           </li>
           {plan.stops.map((s, i) => (
             <li key={s.place.id}>
               <ol>
-                <Drive min={s.driveMin} link={i > 0 ? { on: !!stops[i - 1].linkNext, toggle: () => toggleLink(i - 1) } : undefined} />
+                <Drive min={s.driveMin} by={s.by} transit={legBy(s.by, i)} link={i > 0 ? { on: !!stops[i - 1].linkNext, toggle: () => toggleLink(i - 1) } : undefined} />
                 <li className="flex items-start gap-2 rounded bg-surface px-2 py-1.5 ring-1 ring-border">
                   <span className="w-[5.5rem] shrink-0 tabular-nums text-xs text-muted">
                     {s.role === "stay" ? `${clock(s.arrive)} 着` : `${clock(s.arrive)}–${clock(s.depart)}`}
@@ -226,11 +270,11 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onStart2
               </ol>
             </li>
           ))}
-          <Drive min={plan.returnMin} />
+          <Drive min={plan.returnMin} by={plan.returnBy} transit={legBy(plan.returnBy, stops.length)} />
           <li className="text-sm">
-            <span className="tabular-nums">{clock(plan.home)}</span> 自宅に着く
+            <span className="tabular-nums">{clock(plan.home)}</span> {origin.label}に着く
             {homeOver > 0 && <span className="ml-2 text-xs text-shrine">19時を {homeOver} 分過ぎます</span>}
-            <span className="ml-2 text-xs text-muted">運転 計{Math.floor(plan.driveMin / 60)}時間{plan.driveMin % 60}分</span>
+            <span className="ml-2 text-xs text-muted">移動 計{Math.floor(plan.driveMin / 60)}時間{plan.driveMin % 60}分</span>
           </li>
         </ol>
       )}
@@ -245,7 +289,11 @@ export default function ItineraryPanel({ plan, home, onChange, onStart, onStart2
           {routes.some((r) => r.dropped > 0) && (
             <span className="text-shrine">Googleマップには1日あたり最初の{MAPS_WAYPOINT_MAX}か所までしか渡せません。</span>
           )}
-          <span className="text-muted">時刻は直線距離からの目安です。地点のあいだの「🔗 つなぐ」を押すと、その2か所は並べ直しても続けてこの順に回ります。「＋より前に回る」では、あいだに別の場所が入ってもよい前後だけを決められます。</span>
+          <span className="text-muted">
+            時刻は直線距離からの目安です。
+            {mode === "train" && "電車は乗り換えや本数を考えていません（近い地点のあいだは歩きとみます）。各区間の「乗換を調べる」で確かめてください。"}
+            地点のあいだの「🔗 つなぐ」を押すと、その2か所は並べ直しても続けてこの順に回ります。「＋より前に回る」では、あいだに別の場所が入ってもよい前後だけを決められます。
+          </span>
         </p>
       )}
     </section>

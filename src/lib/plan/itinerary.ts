@@ -1,5 +1,6 @@
 // 日帰り、または宿に泊まる行程を組む。資料館で予習してから本命へ、を守り、ゆかりの社や立ち寄り先は
-// 本命の前後どちらでも、運転がいちばん短くなる順に入れる。道路データは使わないので、時間は直線距離からの目安。
+// 本命の前後どちらでも、移動がいちばん短くなる順に入れる。道路データや時刻表は使わないので、時間は直線距離からの目安。
+// 出発地は自宅とは限らない（出張先の宿や今いる場所から出て、そこへ戻る）
 import type { AreaPlaces, Place } from "@/lib/types";
 
 // stay: 泊まる宿。宿に着いたら1日目が終わり、翌朝そこから2日目を始める
@@ -7,14 +8,18 @@ export type Role = "primer" | "anchor" | "kin" | "extra" | "stay";
 // linkNext: すぐ次の地点とつなぐ。つないだ2か所は、並べ直しても続けてこの順に回る
 // before: この地点より後に回る地点の id。あいだに別の地点が入ってもよい
 export type Stop = { place: Place; role: Role; linkNext?: boolean; before?: string[] };
-// day: 何日目に着くか。宿の depart は翌朝の出発時刻
-export type TimedStop = Stop & { driveMin: number; arrive: number; depart: number; stayMin: number; day: number };
+// 移動手段。電車は、近い地点のあいだを歩く
+export type Mode = "car" | "train" | "bike" | "walk";
+export const MODE_LABEL: Record<Mode, string> = { car: "車", train: "電車", bike: "自転車", walk: "徒歩" };
+// driveMin: ひとつ前の地点からの移動の分、by: その区間の移動手段。day: 何日目に着くか。宿の depart は翌朝の出発時刻
+export type TimedStop = Stop & { driveMin: number; by: Mode; arrive: number; depart: number; stayMin: number; day: number };
 // overMin: 宿に18時、自宅に19時を過ぎる分の合計。lateMin: そのうち宿に遅れる分。earlyMin: 宿に15時より早く着く分
 export type Plan = {
   start: number;
   start2: number;
   stops: TimedStop[];
   returnMin: number;
+  returnBy: Mode;
   home: number;
   days: number;
   driveMin: number;
@@ -60,7 +65,25 @@ export function driveMinutes(from: [number, number], to: [number, number]) {
 
 const at = (p: Place): [number, number] => [p.lng, p.lat];
 
-export function schedule(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2): Plan {
+// 歩き・自転車は道のりを直線の1.25倍とみる
+const WALK_KMH = 4;
+const BIKE_KMH = 14;
+// 電車: 駅までの歩きと待ちに25分。近ければ各駅停車、遠ければ快速・特急（新幹線）の速さとみる。乗り換えや本数は考えない
+const TRAIN_OVERHEAD_MIN = 25;
+
+export function travel(from: [number, number], to: [number, number], mode: Mode = "car"): { min: number; by: Mode } {
+  const km = kmBetween(from, to);
+  const walk = Math.round(((km * 1.25) / WALK_KMH) * 60);
+  if (mode === "walk") return { min: walk, by: "walk" };
+  if (mode === "bike") return { min: Math.round(((km * 1.25) / BIKE_KMH) * 60), by: "bike" };
+  if (mode === "car") return { min: driveMinutes(from, to), by: "car" };
+  const rail = km * 1.2;
+  const kmh = rail > 60 ? 80 : rail > 15 ? 40 : 25;
+  const train = TRAIN_OVERHEAD_MIN + Math.round((rail / kmh) * 60);
+  return walk <= train ? { min: walk, by: "walk" } : { min: train, by: "train" };
+}
+
+export function schedule(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2, mode: Mode = "car"): Plan {
   let t = start;
   let here = home;
   let day = 1;
@@ -68,7 +91,7 @@ export function schedule(stops: Stop[], home: [number, number], start = 8 * 60, 
   let lateMin = 0;
   let earlyMin = 0;
   const timed: TimedStop[] = stops.map((s) => {
-    const driveMin = driveMinutes(here, at(s.place));
+    const { min: driveMin, by } = travel(here, at(s.place), mode);
     drive += driveMin;
     const arrive = t + driveMin;
     const stayMin = stayOf(s);
@@ -80,15 +103,16 @@ export function schedule(stops: Stop[], home: [number, number], start = 8 * 60, 
       day++;
       t = start2;
     } else t = arrive + stayMin;
-    return { ...s, driveMin, arrive, depart: t, stayMin, day: thisDay };
+    return { ...s, driveMin, by, arrive, depart: t, stayMin, day: thisDay };
   });
-  const returnMin = driveMinutes(here, home);
+  const { min: returnMin, by: returnBy } = travel(here, home, mode);
   const homeAt = t + returnMin;
   return {
     start,
     start2,
     stops: timed,
     returnMin,
+    returnBy,
     home: homeAt,
     days: day,
     driveMin: drive + returnMin,
@@ -98,7 +122,7 @@ export function schedule(stops: Stop[], home: [number, number], start = 8 * 60, 
   };
 }
 
-// 並べ方の良し悪し。運転の合計に、宿や自宅に遅れる分を重く足す（日帰りなら早く帰れる順と同じ）。
+// 並べ方の良し悪し。移動の合計に、宿や自宅に遅れる分を重く足す（日帰りなら早く帰れる順と同じ）。
 // 宿に昼過ぎに着いてしまう並びも避ける（チェックインまでの待ちを、運転と同じ重さで数える）
 const OVER_WEIGHT = 3;
 export const costOf = (p: Plan) => p.driveMin + OVER_WEIGHT * p.overMin + p.earlyMin;
@@ -117,7 +141,7 @@ function kinCandidates(places: AreaPlaces, anchor: Place) {
 
 // 本命を決めて、予習先と、日が暮れるまでに回れるゆかりの社を足した行程を作る。
 // 本命は社のほか、博物館・美術館・城も選べる（社以外のときは予習先を付けない）
-export function suggestPlan(places: AreaPlaces, home: [number, number], anchorId?: string, start = 8 * 60): Stop[] {
+export function suggestPlan(places: AreaPlaces, home: [number, number], anchorId?: string, start = 8 * 60, mode: Mode = "car"): Stop[] {
   const anchor =
     places.anchors.find((a) => a.id === anchorId) ?? [...(places.halls ?? []), ...(places.castles ?? [])].find((h) => h.id === anchorId) ?? places.anchors[0];
   if (!anchor) return [];
@@ -136,21 +160,21 @@ export function suggestPlan(places: AreaPlaces, home: [number, number], anchorId
   let added = 0;
   for (const cand of kinCandidates(places, anchor)) {
     if (added >= MAX_KIN) break;
-    const next = insertKin(stops, { place: cand, role: "kin" }, home, start);
-    if (schedule(next, home, start).overMin > 0) continue;
+    const next = insertKin(stops, { place: cand, role: "kin" }, home, start, DEFAULT_START2, mode);
+    if (schedule(next, home, start, DEFAULT_START2, mode).overMin > 0) continue;
     stops.splice(0, stops.length, ...next);
     added++;
   }
-  return optimizeOrder(stops, home, start);
+  return optimizeOrder(stops, home, start, DEFAULT_START2, mode);
 }
 
 // ゆかりの社は、帰りの時刻がいちばん早くなる位置に入れる（本命の前でもよい）
-export function insertKin(stops: Stop[], kin: Stop, home: [number, number], start = 8 * 60, start2 = DEFAULT_START2): Stop[] {
+export function insertKin(stops: Stop[], kin: Stop, home: [number, number], start = 8 * 60, start2 = DEFAULT_START2, mode: Mode = "car"): Stop[] {
   let best: Stop[] | null = null;
   let bestHome = Infinity;
   for (let i = 0; i <= stops.length; i++) {
     const next = [...stops.slice(0, i), kin, ...stops.slice(i)];
-    const h = costOf(schedule(next, home, start, start2));
+    const h = costOf(schedule(next, home, start, start2, mode));
     if (h < bestHome) {
       bestHome = h;
       best = next;
@@ -169,7 +193,7 @@ export function blocksOf(stops: Stop[]): Stop[][] {
   return blocks.map((b) => (b[b.length - 1].linkNext ? [...b.slice(0, -1), { ...b[b.length - 1], linkNext: false }] : b));
 }
 
-// 予習先が本命より前にあることと、つないだ地点の並びを守って、運転がいちばん短くなる順に並べ直す。
+// 予習先が本命より前にあることと、つないだ地点の並びを守って、移動がいちばん短くなる順に並べ直す。
 // 宿があれば、どこを1日目に、どこを2日目に回るかもあわせて決まる。
 // かたまりが8つまでなら全部の順番を試し、それより多いときは区間を裏返す改善（2-opt）で縮める。
 // 「A は B より前」の条件も守る。条件どうしがぶつかって守れないときは、今の順のままにする
@@ -196,12 +220,12 @@ function* permutations<T>(xs: T[]): Generator<T[]> {
   }
 }
 
-export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2): Stop[] {
+export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2, mode: Mode = "car"): Stop[] {
   const blocks = blocksOf(stops);
   if (blocks.length <= 1) return blocks.flat();
   const cost = (order: Stop[][]) => {
     const o = order.flat();
-    return primerFirst(o) && keepsOrder(o) ? costOf(schedule(o, home, start, start2)) : Infinity;
+    return primerFirst(o) && keepsOrder(o) ? costOf(schedule(o, home, start, start2, mode)) : Infinity;
   };
   // 今の順で同点なら動かさない
   let best = blocks;
@@ -233,11 +257,18 @@ export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 *
 
 export const clock = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
 
-// Google マップの経路。宿があれば日ごとに分ける（自宅または宿から、宿または自宅まで。立ち寄りは9か所まで）
+// Google マップの経路。宿があれば日ごとに分ける（出発地または宿から、宿または出発地まで。立ち寄りは9か所まで。
+// スマホのブラウザでは3か所までしか通らないことがある）。
+// 電車では経由地が使えないので、区間ごとに乗換案内を開く
 export const MAPS_WAYPOINT_MAX = 9;
+const TRAVELMODE: Record<Mode, string> = { car: "driving", train: "transit", bike: "bicycling", walk: "walking" };
+const ll = ([lng, lat]: [number, number]) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
 
-export function googleMapsRoutes(stops: Stop[], home: [number, number]) {
-  const ll = ([lng, lat]: [number, number]) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
+export function googleMapsLeg(from: [number, number], to: [number, number], mode: Mode) {
+  return `https://www.google.com/maps/dir/?${new URLSearchParams({ api: "1", origin: ll(from), destination: ll(to), travelmode: TRAVELMODE[mode] })}`;
+}
+
+export function googleMapsRoutes(stops: Stop[], home: [number, number], mode: Mode = "car") {
   const legs: { from: [number, number]; to: [number, number]; via: Stop[] }[] = [];
   let from = home;
   let via: Stop[] = [];
@@ -258,7 +289,7 @@ export function googleMapsRoutes(stops: Stop[], home: [number, number]) {
       api: "1",
       origin: ll(leg.from),
       destination: ll(leg.to),
-      travelmode: "driving",
+      travelmode: TRAVELMODE[mode],
       waypoints: leg.via.slice(0, MAPS_WAYPOINT_MAX).map((s) => ll(at(s.place))).join("|"),
     })}`,
   }));
