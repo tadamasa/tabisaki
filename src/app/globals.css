@@ -1,27 +1,37 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f5f0;
-  --surface: #ffffff;
-  --foreground: #23211c;
-  --muted: #6b665c;
-  --border: #e4e0d6;
-  --visited: #2f8f83;
-  --area: #d9822b;
-  --shrine: #c2412d;
-  --museum: #3b6fb6;
-  --art: #7b4fa0;
-  --castle: #7a5a2e;
-  --inn: #3f7a46;
+  /* 日本の伝統色: 生成りの紙に墨の文字、朱・藍・江戸紫・檜皮・千歳緑・青磁・萱草。src/lib/kinds.ts の HUE と同じ値 */
+  --background: #f6f1e7;
+  --surface: #fffdf8;
+  --foreground: #2a2622;
+  --muted: #6e675c;
+  --border: #e6dccb;
+  --visited: #4f8f7e;
+  --area: #e08a2e;
+  --shrine: #c8432b;
+  --museum: #2c5a8a;
+  --art: #745399;
+  --castle: #8a5a3b;
+  --inn: #316745;
+  --gold: #e3b23c;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #1b1a17;
-    --surface: #26241f;
-    --foreground: #ece8df;
-    --muted: #a39d90;
-    --border: #3a372f;
+    /* 夜は墨の地に、色を少し明るくして読みやすくする */
+    --background: #1c1a17;
+    --surface: #27241f;
+    --foreground: #eee8dc;
+    --muted: #a8a093;
+    --border: #3b372f;
+    --visited: #6fb3a0;
+    --area: #eea04b;
+    --shrine: #e2654b;
+    --museum: #6f9fd6;
+    --art: #a98bd0;
+    --castle: #c08e67;
+    --inn: #6aab7f;
   }
 }
 
@@ -38,6 +48,7 @@
   --color-art: var(--art);
   --color-castle: var(--castle);
   --color-inn: var(--inn);
+  --color-gold: var(--gold);
   --font-sans: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
 }
 
@@ -49,14 +60,15 @@ body {
 
 /* 地図の吹き出し。暗い画面設定でも白地に濃い文字で読めるようにし、閉じるボタンを大きくする */
 .maplibregl-popup-content {
-  color: #23211c;
+  color: #2a2622;
+  background: #fffdf8;
   font-size: 13px;
   line-height: 1.6;
   padding: 10px 34px 10px 12px;
   border-radius: 8px;
 }
 .maplibregl-popup-content a {
-  color: #3b6fb6;
+  color: #2c5a8a;
   text-decoration: underline;
 }
 .maplibregl-popup-close-button {
@@ -64,10 +76,42 @@ body {
   height: 30px;
   font-size: 22px;
   line-height: 1;
-  color: #6b665c;
+  color: #6e675c;
   border-radius: 0 8px 0 8px;
 }
 .maplibregl-popup-close-button:hover {
-  background: #efece4;
-  color: #23211c;
+  background: #f3ede1;
+  color: #2a2622;
+}
+
+/* 地図の上の場所の印。アイコンを白い丸に入れ、種類の色で縁取る */
+.place-pin {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #fffdf8;
+  border: 2.5px solid var(--pin, #2a2622);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.place-pin:hover {
+  transform: scale(1.15);
+}
+/* 旅の日の前後に例祭がある社は、金の縁で大きく */
+.place-pin.festive {
+  width: 34px;
+  height: 34px;
+  font-size: 18px;
+  border: 3px solid #e3b23c;
+  box-shadow: 0 0 0 3px rgb(227 178 60 / 0.35), 0 1px 4px rgb(0 0 0 / 0.3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .place-pin {
+    transition: none;
+  }
 }

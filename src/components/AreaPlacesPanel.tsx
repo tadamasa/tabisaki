@@ -1,5 +1,6 @@
 "use client";
 
+import { KIND } from "@/lib/kinds";
 import { festivalNote } from "@/lib/places/festival";
 import { TOWN_AREA_PREFIX } from "@/lib/townArea";
 import AreaNews from "./AreaNews";
@@ -7,22 +8,6 @@ import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
 
-const KIND_LABEL: Record<Place["kind"], string> = {
-  shrine: "神社",
-  museum: "資料館・博物館",
-  art: "美術館",
-  castle: "城・城跡",
-  info: "観光案内所",
-  lodging: "宿",
-};
-const DOT: Record<Place["kind"], string> = {
-  shrine: "bg-shrine",
-  museum: "bg-museum",
-  art: "bg-art",
-  castle: "bg-castle",
-  info: "bg-museum",
-  lodging: "bg-inn",
-};
 const innSearchLink = (p: Place) => `https://www.google.com/search?q=${encodeURIComponent(`${p.name} ${p.town} 宿泊予約`)}`;
 
 const mapsLink = (p: Place) =>
@@ -147,10 +132,12 @@ function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFoc
   return (
     <li className="flex items-start justify-between gap-2 py-1.5">
       <span className="min-w-0">
-        <span className={`mr-1.5 inline-block size-2 rounded-full ${DOT[place.kind]}`} />
+        <span className="mr-1" aria-hidden>
+          {KIND[place.kind].icon}
+        </span>
         <PlaceName place={place} />
         <span className="ml-1.5 text-xs text-muted">
-          {KIND_LABEL[place.kind]} ・ {place.town}
+          {KIND[place.kind].label} ・ {place.town}
         </span>{" "}
         <button type="button" onClick={() => onFocus(place)} className="text-xs text-museum underline">
           地図
@@ -189,7 +176,7 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
     <div className="mt-4 space-y-4">
       {festive.length > 0 && (
         <section className="rounded-lg border border-shrine/40 bg-shrine/5 p-2.5">
-          <h3 className="text-xs font-semibold tracking-wide text-shrine">旅の日の前後に例祭がある社</h3>
+          <h3 className="text-xs font-semibold tracking-wide text-shrine">🏮 旅の日の前後に例祭がある社</h3>
           <ul className="mt-1 space-y-1 text-sm">
             {festive.map((a) => (
               <li key={a.id} className="flex items-start justify-between gap-2">
@@ -206,7 +193,7 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
       )}
       <section>
         <h3 className="text-xs font-semibold tracking-wide text-muted">
-          神社（{state.areaId.startsWith(TOWN_AREA_PREFIX) ? "この町" : "地帯"}の {shrineCount} 社から）
+          ⛩️ 神社（{state.areaId.startsWith(TOWN_AREA_PREFIX) ? "この町" : "地帯"}の {shrineCount} 社から）
         </h3>
         {anchors.length === 0 ? (
           <p className="mt-1 text-sm text-muted">名前のわかる神社が見つかりませんでした。</p>
@@ -216,7 +203,9 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
               <li key={a.id} className="rounded-lg border border-border p-2.5">
                 <div className="flex items-baseline justify-between gap-2">
                   <span>
-                    <span className="mr-1.5 inline-block size-2 rounded-full bg-shrine" />
+                    <span className="mr-1" aria-hidden>
+                      ⛩️
+                    </span>
                     <PlaceName place={a} />
                     <span className="ml-1.5 text-xs text-muted">{a.town}</span>
                     <FestivalBadge place={a} trip={trip} />
@@ -255,7 +244,7 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
       </section>
 
       <section>
-        <h3 className="text-xs font-semibold tracking-wide text-muted">博物館・美術館・資料館</h3>
+        <h3 className="text-xs font-semibold tracking-wide text-muted">🏛️ 博物館・美術館・資料館</h3>
         {halls.length === 0 ? (
           <p className="mt-1 text-sm text-muted">地帯の中には見つかりませんでした。隣の町を探すのがよさそうです。</p>
         ) : (
@@ -269,7 +258,7 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
 
       {castles.length > 0 && (
         <section>
-          <h3 className="text-xs font-semibold tracking-wide text-muted">城・城跡</h3>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">🏯 城・城跡</h3>
           <ul className="mt-1 divide-y divide-border text-sm">
             {castles.map((p) => (
               <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
@@ -280,7 +269,7 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
 
       {infos.length > 0 && (
         <section>
-          <h3 className="text-xs font-semibold tracking-wide text-muted">観光案内所</h3>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">ℹ️ 観光案内所</h3>
           <ul className="mt-1 divide-y divide-border text-sm">
             {infos.map((p) => (
               <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
@@ -289,7 +278,7 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
         </section>
       )}
       <section>
-        <h3 className="text-xs font-semibold tracking-wide text-muted">宿</h3>
+        <h3 className="text-xs font-semibold tracking-wide text-muted">♨️ 宿</h3>
         {lodgings.length === 0 ? (
           <p className="mt-1 text-sm text-muted">地帯とその隣の町には、地図に載った宿が見つかりませんでした。</p>
         ) : (

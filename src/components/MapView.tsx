@@ -4,6 +4,7 @@ import maplibregl, { type FilterSpecification, type MapGeoJSONFeature } from "ma
 import { useEffect, useRef } from "react";
 import type { Origin } from "@/lib/origin";
 import { kmBetween } from "@/lib/origin";
+import { HUE, KIND } from "@/lib/kinds";
 import { festivalNote } from "@/lib/places/festival";
 import type { TimedStop } from "@/lib/plan/itinerary";
 import type { AreaPlaces, Atlas, BlankArea, MuniProps, Place, Spot } from "@/lib/types";
@@ -40,22 +41,6 @@ const CATEGORY_LABEL: Record<Spot["cat"], string> = {
   other: "その他",
 };
 
-const PLACE_LABEL: Record<Place["kind"], string> = {
-  shrine: "神社",
-  museum: "資料館・博物館",
-  art: "美術館",
-  castle: "城・城跡",
-  info: "観光案内所",
-  lodging: "宿",
-};
-const PLACE_BG: Record<Place["kind"], string> = {
-  shrine: "bg-shrine",
-  museum: "bg-museum",
-  art: "bg-art",
-  castle: "bg-castle",
-  info: "bg-museum",
-  lodging: "bg-inn",
-};
 
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -97,7 +82,7 @@ function muniPopup(p: MuniProps, [lng, lat]: [number, number], origin: () => Ori
   b.type = "button";
   b.textContent = area ? "この地帯の候補を探す" : "この町の候補を探す";
   b.style.cssText =
-    "margin-top:8px;min-height:32px;padding:0 12px;border-radius:999px;border:1px solid #3b6fb6;color:#3b6fb6;background:#fff;font-size:13px;cursor:pointer";
+    `margin-top:8px;min-height:32px;padding:0 12px;border-radius:999px;border:1px solid ${HUE.ai};color:${HUE.ai};background:#fff;font-size:13px;cursor:pointer`;
   content.append(info, b);
   const popup = new maplibregl.Popup({ offset: 14, maxWidth: "280px" }).setDOMContent(content);
   b.addEventListener("click", () => {
@@ -118,7 +103,7 @@ function bboxOf(g: import("geojson").Polygon | import("geojson").MultiPolygon) {
 
 const formatDate = (ts: string | null) => (ts ? ts.slice(0, 10).replaceAll("-", "/") : "—");
 
-const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: "#3b6fb6", anchor: "#c2412d", kin: "#e07a5f", extra: "#7b4fa0", stay: "#3f7a46" };
+const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: HUE.ai, anchor: HUE.shu, kin: "#e07a5f", extra: HUE.edomurasaki, stay: HUE.chitose };
 
 // 宿の空きを調べる検索（予約サイトを1つに決めない）
 export const innSearchLink = (p: Place) =>
@@ -140,17 +125,17 @@ function renderActions(box: HTMLElement, place: Place, plan: PlanEdit) {
   if (place.id === plan.anchorId) {
     const s = document.createElement("span");
     s.textContent = "行程の本命です";
-    s.style.cssText = "color:#c2412d;font-size:13px;font-weight:600";
+    s.style.cssText = `color:${HUE.shu};font-size:13px;font-weight:600`;
     box.append(s);
     return;
   }
   const inPlan = plan.planIds.has(place.id);
   if (place.kind === "lodging") {
-    button(inPlan ? "泊まるのをやめる" : "ここに泊まる", inPlan ? "#6b665c" : "#3f7a46", () => plan.onTogglePlace(place));
+    button(inPlan ? "泊まるのをやめる" : "ここに泊まる", inPlan ? HUE.nibi : HUE.chitose, () => plan.onTogglePlace(place));
     return;
   }
-  if (place.kind !== "info") button("本命にする", "#c2412d", () => plan.onMakeAnchor(place));
-  button(inPlan ? "行程から外す" : "＋行程", inPlan ? "#6b665c" : "#3b6fb6", () => plan.onTogglePlace(place));
+  if (place.kind !== "info") button("本命にする", HUE.shu, () => plan.onMakeAnchor(place));
+  button(inPlan ? "行程から外す" : "＋行程", inPlan ? HUE.nibi : HUE.ai, () => plan.onTogglePlace(place));
 }
 
 const routeData = (route: Props["route"]): import("geojson").FeatureCollection => ({
@@ -254,7 +239,7 @@ export default function MapView({ atlas, areaIds, origin, selected, places, trip
           },
         },
         layers: [
-          { id: "bg", type: "background", paint: { "background-color": "#efece4" } },
+          { id: "bg", type: "background", paint: { "background-color": HUE.kinari } },
           { id: "gsi", type: "raster", source: "gsi" },
         ],
       },
@@ -270,27 +255,27 @@ export default function MapView({ atlas, areaIds, origin, selected, places, trip
         type: "fill",
         source: "munis",
         filter: ["==", ["get", "visited"], true],
-        paint: { "fill-color": "#2f8f83", "fill-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0.42, 12, 0.18] },
+        paint: { "fill-color": HUE.seiji, "fill-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0.42, 12, 0.18] },
       });
       map.addLayer({
         id: "muni-area",
         type: "fill",
         source: "munis",
         filter: areaFilter(areaIds),
-        paint: { "fill-color": "#d9822b", "fill-opacity": 0.14 },
+        paint: { "fill-color": HUE.kanzo, "fill-opacity": 0.16 },
       });
       map.addLayer({
         id: "muni-selected",
         type: "fill",
         source: "munis",
         filter: ["==", ["get", "area"], "__none__"],
-        paint: { "fill-color": "#d9822b", "fill-opacity": 0.55 },
+        paint: { "fill-color": HUE.kanzo, "fill-opacity": 0.55 },
       });
       map.addLayer({
         id: "muni-line",
         type: "line",
         source: "munis",
-        paint: { "line-color": "#6b665c", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.2, 10, 1] },
+        paint: { "line-color": HUE.nibi, "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.2, 10, 1] },
       });
 
       map.addSource("spots", {
@@ -315,9 +300,9 @@ export default function MapView({ atlas, areaIds, origin, selected, places, trip
             "match",
             ["get", "cat"],
             "shrine",
-            "#c2412d",
+            HUE.shu,
             "museum",
-            "#3b6fb6",
+            HUE.ai,
             "#7a7466",
           ],
           "circle-stroke-color": "#ffffff",
@@ -325,7 +310,7 @@ export default function MapView({ atlas, areaIds, origin, selected, places, trip
         },
       });
 
-      new maplibregl.Marker({ color: "#23211c" })
+      new maplibregl.Marker({ color: HUE.sumi })
         .setLngLat(home)
         .setPopup(new maplibregl.Popup({ offset: 24 }).setText("自宅"))
         .addTo(map);
@@ -470,15 +455,17 @@ export default function MapView({ atlas, areaIds, origin, selected, places, trip
       if (placeMarkersRef.current.has(p.id)) continue;
       const festival = festivalNote(p.reisai, trip);
       const el = document.createElement("div");
-      // 旅の日の前後に例祭がある社は、印を大きく、金の縁で出す
-      el.className = `cursor-pointer rounded-full shadow ${PLACE_BG[p.kind]} ${festival ? "size-5 ring-[3px] ring-amber-400" : "size-3.5 ring-2 ring-white"}`;
+      // 種類のアイコンを、種類の色で縁取った丸に入れる。旅の日の前後に例祭がある社は、金の縁で大きく出す
+      el.className = `place-pin${festival ? " festive" : ""}`;
+      el.style.setProperty("--pin", KIND[p.kind].color);
+      el.textContent = KIND[p.kind].icon;
       el.title = p.name;
       const content = document.createElement("div");
       const info = document.createElement("div");
       info.innerHTML =
-        `<strong>${escapeHtml(p.name)}</strong><br>${PLACE_LABEL[p.kind]} ・ ${escapeHtml(p.town)}` +
+        `<strong>${escapeHtml(p.name)}</strong><br>${KIND[p.kind].icon} ${KIND[p.kind].label} ・ ${escapeHtml(p.town)}` +
         (p.shakaku?.length ? `<br>社格: ${p.shakaku.map(escapeHtml).join("・")}` : "") +
-        (p.reisai ? `<br>例祭: ${escapeHtml(p.reisai)}${festival ? ` <b style="color:#c2412d">🏮 ${festival}</b>` : ""}` : "") +
+        (p.reisai ? `<br>例祭: ${escapeHtml(p.reisai)}${festival ? ` <b style="color:${HUE.shu}">🏮 ${festival}</b>` : ""}` : "") +
         (p.reasons.length ? `<br>${p.reasons.map(escapeHtml).join("・")}` : "") +
         (p.wikipedia ? `<br><a href="${escapeHtml(p.wikipedia)}" target="_blank" rel="noreferrer">Wikipedia</a>` : "") +
         (p.kind === "lodging" ? `<br><a href="${escapeHtml(innSearchLink(p))}" target="_blank" rel="noreferrer">空室・料金を調べる</a>` : "") +
@@ -507,7 +494,7 @@ export default function MapView({ atlas, areaIds, origin, selected, places, trip
           type: "line",
           source: "route",
           layout: { "line-join": "round", "line-cap": "round" },
-          paint: { "line-color": "#23211c", "line-width": 2.5, "line-opacity": 0.7, "line-dasharray": [2, 1.5] },
+          paint: { "line-color": HUE.sumi, "line-width": 2.5, "line-opacity": 0.7, "line-dasharray": [2, 1.5] },
         });
       }
       routeMarkersRef.current.forEach((m) => m.remove());

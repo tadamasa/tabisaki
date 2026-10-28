@@ -43,12 +43,12 @@ export default function AreaNews({ areaId }: { areaId: string }) {
     <>
       {current && !("error" in current) && current.exhibits.length > 0 && (
         <section>
-          <h3 className="text-xs font-semibold tracking-wide text-muted">博物館・美術館の展示（この60日のニュース見出し）</h3>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">🖼️ 博物館・美術館の展示（この60日のニュース見出し）</h3>
           <Headlines items={current.exhibits} />
         </section>
       )}
       <section>
-        <h3 className="text-xs font-semibold tracking-wide text-muted">話題の催し（この30日のニュース見出し）</h3>
+        <h3 className="text-xs font-semibold tracking-wide text-muted">📰 話題の催し（この30日のニュース見出し）</h3>
         {!current ? (
           <p className="mt-1 text-sm text-muted">探しています…</p>
         ) : "error" in current ? (

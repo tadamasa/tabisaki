@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_START2, type Mode, type Role, type Stop, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { KIND } from "@/lib/kinds";
 import { DISTANCES, type Origin, fromOrigin, townCenters } from "@/lib/origin";
 import { townArea } from "@/lib/townArea";
 import type { AreaPlaces, Atlas, Place } from "@/lib/types";
@@ -425,7 +426,13 @@ export default function Explorer() {
           <>
             <header className="border-b border-border px-4 pb-3 pt-4">
               <div className="flex items-baseline justify-between gap-3">
-                <h1 className="text-lg font-semibold">次はどこへ</h1>
+                <h1 className="flex items-center gap-2 text-lg font-semibold">
+                  {/* 朱印のような「旅」の印 */}
+                  <span aria-hidden className="grid size-7 rotate-[-4deg] place-items-center rounded-[4px] border-2 border-shrine text-sm font-bold text-shrine">
+                    旅
+                  </span>
+                  次はどこへ
+                </h1>
                 <button
                   type="button"
                   onClick={refresh}
@@ -474,7 +481,7 @@ export default function Explorer() {
                   </div>
                 </>
               )}
-              <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+              <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
                 <li className="flex items-center gap-1.5">
                   <span className="inline-block size-3 rounded-sm bg-visited/60" />
                   行った町
@@ -483,26 +490,12 @@ export default function Explorer() {
                   <span className="inline-block size-3 rounded-sm bg-area/40" />
                   まだの町がまとまる地帯
                 </li>
-                <li className="flex items-center gap-1.5">
-                  <span className="inline-block size-2.5 rounded-full bg-shrine" />
-                  神社
-                </li>
-                <li className="flex items-center gap-1.5">
-                  <span className="inline-block size-2.5 rounded-full bg-museum" />
-                  資料館・博物館
-                </li>
-                <li className="flex items-center gap-1.5">
-                  <span className="inline-block size-2.5 rounded-full bg-art" />
-                  美術館
-                </li>
-                <li className="flex items-center gap-1.5">
-                  <span className="inline-block size-2.5 rounded-full bg-castle" />
-                  城・城跡
-                </li>
-                <li className="flex items-center gap-1.5">
-                  <span className="inline-block size-2.5 rounded-full bg-inn" />
-                  宿
-                </li>
+                {(["shrine", "museum", "art", "castle", "lodging"] as const).map((k) => (
+                  <li key={k}>
+                    {KIND[k].icon} {KIND[k].label}
+                  </li>
+                ))}
+                <li>🏮 旅の日に例祭</li>
               </ul>
             </header>
 

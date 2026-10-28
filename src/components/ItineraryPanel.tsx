@@ -17,6 +17,7 @@ import {
   googleMapsRoutes,
 } from "@/lib/plan/itinerary";
 import type { Origin } from "@/lib/origin";
+import { KIND } from "@/lib/kinds";
 import { FestivalBadge } from "./AreaPlacesPanel";
 import type { Place } from "@/lib/types";
 
@@ -28,6 +29,7 @@ const ROLE_CLASS: Record<Role, string> = {
   extra: "bg-art/10 text-art",
   stay: "bg-inn text-white",
 };
+const MODE_ICON: Record<Mode, string> = { car: "🚗", train: "🚃", bike: "🚲", walk: "🚶" };
 const START_TIMES = [6, 7, 8, 9, 10].map((h) => h * 60);
 const START2_TIMES = [7, 8, 9, 10, 11].map((h) => h * 60);
 
@@ -72,7 +74,7 @@ function Drive({ min, by, transit, link }: { min: number; by: Mode; transit?: st
   return (
     <li className="flex flex-wrap items-center gap-x-2 py-0.5 pl-6 text-[11px] text-muted">
       <span className={link?.on ? "border-l-2 border-area pl-2" : ""}>
-        {MODE_LABEL[by]}で約 {min} 分
+        {MODE_ICON[by]} {MODE_LABEL[by]}で約 {min} 分
       </span>
       {transit && (
         <a href={transit} target="_blank" rel="noreferrer" className="text-museum underline">
@@ -255,6 +257,9 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
                   <span className="min-w-0 flex-1">
                     <span className={`mr-1.5 rounded px-1 text-[11px] ${ROLE_CLASS[s.role]}`}>{ROLE_LABEL[s.role]}</span>
                     <button type="button" onClick={() => onFocus(s.place)} className="text-left font-medium hover:underline">
+                      <span className="mr-0.5" aria-hidden>
+                        {KIND[s.place.kind].icon}
+                      </span>
                       {s.place.name}
                     </button>
                     <span className="ml-1 text-xs text-muted">{s.place.town}</span>
