@@ -4,6 +4,7 @@ import { KIND } from "@/lib/kinds";
 import { festivalNote } from "@/lib/places/festival";
 import { TOWN_AREA_PREFIX } from "@/lib/townArea";
 import AreaNews from "./AreaNews";
+import { LinkChips, placeTarget } from "./Links";
 import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
@@ -17,6 +18,16 @@ function PlaceName({ place }: { place: Place }) {
   return (
     <a href={place.wikipedia ?? mapsLink(place)} target="_blank" rel="noreferrer" className="font-medium underline-offset-2 hover:underline">
       {place.name}
+    </a>
+  );
+}
+
+// 地図に登録された公式サイト
+function SiteLink({ place }: { place: Place }) {
+  if (!place.website || !/^https?:\/\//.test(place.website)) return null;
+  return (
+    <a href={place.website} target="_blank" rel="noreferrer" className="ml-1.5 text-xs text-museum underline">
+      公式サイト
     </a>
   );
 }
@@ -142,9 +153,11 @@ function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFoc
         <button type="button" onClick={() => onFocus(place)} className="text-xs text-museum underline">
           地図
         </button>
+        <SiteLink place={place} />
         {place.reasons.length > 0 && (
           <span className="ml-1.5 text-[11px] text-muted">{place.reasons.join("・")}</span>
         )}
+        <LinkChips target={placeTarget(place)} />
       </span>
       <PlanButtons place={place} {...plan} />
     </li>
@@ -209,6 +222,7 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
                     <PlaceName place={a} />
                     <span className="ml-1.5 text-xs text-muted">{a.town}</span>
                     <FestivalBadge place={a} trip={trip} />
+                    <SiteLink place={a} />
                   </span>
                   <button type="button" onClick={() => onFocus(a)} className="shrink-0 text-xs text-museum underline">
                     地図
@@ -237,6 +251,7 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
                     で予習 → 本命へ（約 {a.primer.km} km）
                   </p>
                 )}
+                <LinkChips target={placeTarget(a)} />
               </li>
             ))}
           </ol>

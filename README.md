@@ -15,6 +15,9 @@
 - 移動手段を車（既定）・電車・自転車・徒歩から選べる。時間の目安、距離の絞り込みの幅、Googleマップの経路が切り替わる。電車は乗り換えや本数を考えない目安で、近い地点のあいだは歩きとみる。区間ごとに乗換案内を開ける
 - 旅の日を決めると、前後3日に例祭がある社に🏮の印を付ける（Wikipedia の基礎情報の例祭欄から。旧暦の日付は数えない）
 - 地帯の町で、この30日に話題になった祭り・催しのニュース見出しと、地帯の博物館・美術館の特別展・企画展の見出し（この60日）を出す（Google ニュースの検索 RSS）
+- 地帯の町ごとに、公式サイト（Wikidata）・観光パンフレットの検索・Wikipedia へのリンクを出す。社や館は地図に登録された公式サイトも出す
+- 町・社・館に、パンフレットや Google ドライブに保存した資料のリンクを「＋資料」で登録できる。縁泉スプレッドシートの links シートに保存し（[gas/ensen-api.gs](gas/ensen-api.gs)）、行程にも出す
+- 地図の印は種類ごとのアイコン（⛩️🏛️🎨🏯ℹ️♨️）。配色は日本の伝統色
 - 「縁泉の最新の記録を読む」で、縁泉に追加した記録をすぐ反映（ふだんは1時間ごとに読み直す）
 
 ## 縁泉スプレッドシートとのつなぎ方
@@ -44,6 +47,7 @@ npm run dev
 - 行政区域（`data/boundaries/`）: 国土数値情報（行政区域データ、2021年1月1日）を [SmartNews メディア研究所](https://github.com/smartnews-smri/japan-topography) が簡素化したもの。政令指定都市は市単位
 - 町どうしの移動の手間（`data/boundaries/edges.json`）: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) の標高（SRTM・GMTED ほか）から `scripts/terrain_edges.py` で計算。坂が急なほど手間がかかるとして隣り合う町の代表点を結ぶ最小コスト経路を求め、平地を時速40kmで走る分に換算した目安
 - 神社・資料館・観光案内所: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors（ODbL）。Overpass API で検索し、地帯ごとに1日キャッシュ
+- 市町村の公式サイト: [Wikidata](https://www.wikidata.org/)（CC0）の全国地方公共団体コード（P429）と公式サイト（P856）
 - 出発地の検索: [Nominatim](https://nominatim.org/)（© OpenStreetMap contributors、[利用方針](https://operations.osmfoundation.org/policies/nominatim/)に沿って押したときだけ問い合わせる）と[国土地理院の住所検索](https://msearch.gsi.go.jp/address-search/AddressSearch)。町の名前は端末の中だけで候補に出す
 - 話題の催し: [Google ニュース](https://news.google.com/)の検索 RSS。見出しを機械的に拾ったもので、日付の整ったイベント情報ではない。数時間キャッシュ
 - 祭神・社格・例祭: [Wikipedia 日本語版](https://ja.wikipedia.org/)の神社記事の基礎情報（CC BY-SA 4.0）。記事の座標が実際の場所から 1.5km 以内のときだけ同じ社とみなす

@@ -19,6 +19,7 @@ import {
 import type { Origin } from "@/lib/origin";
 import { KIND } from "@/lib/kinds";
 import { FestivalBadge } from "./AreaPlacesPanel";
+import { LinkChips, placeTarget } from "./Links";
 import type { Place } from "@/lib/types";
 
 const ROLE_LABEL: Record<Role, string> = { primer: "予習", anchor: "本命", kin: "ゆかり", extra: "立ち寄り", stay: "泊" };
@@ -264,6 +265,7 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
                     </button>
                     <span className="ml-1 text-xs text-muted">{s.place.town}</span>
                     <FestivalBadge place={s.place} trip={trip} />
+                    <LinkChips target={placeTarget(s.place)} editable={false} />
                     <OrderRules
                       stop={s}
                       at={i}

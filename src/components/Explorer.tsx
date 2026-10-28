@@ -9,6 +9,8 @@ import { townArea } from "@/lib/townArea";
 import type { AreaPlaces, Atlas, Place } from "@/lib/types";
 import AreaPlacesPanel, { type PlacesState } from "./AreaPlacesPanel";
 import ItineraryPanel from "./ItineraryPanel";
+import { LinksProvider } from "./Links";
+import TownGuide from "./TownGuide";
 import TripSettings from "./TripSettings";
 
 const MapView = dynamic(() => import("./MapView"), {
@@ -17,7 +19,6 @@ const MapView = dynamic(() => import("./MapView"), {
 });
 
 const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
-const wikiLink = (q: string) => `https://ja.wikipedia.org/wiki/${encodeURIComponent(q)}`;
 
 // 編集した行程は、この端末のブラウザに地帯ごとに覚えておく
 // 3つ目が 1 の地点は、すぐ次の地点とつないである。4つ目は、この地点より後に回る地点の id。start2 は2日目に宿を出る時刻
@@ -89,7 +90,16 @@ async function fetchAtlas(): Promise<Atlas> {
   return body;
 }
 
+// 登録した資料のリンクは、地帯の画面・候補・行程のどこからでも使う
 export default function Explorer() {
+  return (
+    <LinksProvider>
+      <ExplorerView />
+    </LinksProvider>
+  );
+}
+
+function ExplorerView() {
   const [data, setData] = useState<Atlas | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -402,24 +412,10 @@ export default function Explorer() {
                   </p>
                 </>
               )}
-              <h3 className="mt-6 text-xs font-semibold tracking-wide text-muted">
-                {data?.areas.some((a) => a.id === selected.id) ? "この地帯のまだ行っていない町" : "この町"}
-              </h3>
-              <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                {selected.towns.map((t) => (
-                  <li key={t.id}>
-                    <a
-                      href={wikiLink(t.name.match(/[市区町村]$/) ? t.name : `${t.pref}${t.name}`)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex min-h-8 items-center rounded-full border border-border px-2.5 text-sm hover:border-area"
-                    >
-                      {t.name}
-                      <span className="ml-1 text-xs text-muted">{t.km}km</span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
+              <TownGuide
+                towns={selected.towns}
+                title={near?.areas.some((a) => a.id === selected.id) ? "この地帯のまだ行っていない町" : "この町"}
+              />
             </div>
           </>
         ) : (
