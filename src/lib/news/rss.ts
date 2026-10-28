@@ -31,6 +31,17 @@ export function parseNewsRss(xml: string): NewsItem[] {
   return items;
 }
 
+// 博物館・美術館の名前（どれか）と、展示の言葉（どれか）を含む記事。会期が長いので60日さかのぼる。
+// 「資料館」だけのような短い名前は別の館の記事を拾うので使わない
+export const EXHIBIT_NAME_MIN = 5;
+export function exhibitQuery(halls: string[]) {
+  const names = halls.filter((h) => h.length >= EXHIBIT_NAME_MIN).map((h) => `"${h}"`);
+  return names.length ? `(${names.join(" OR ")}) (特別展 OR 企画展 OR 展覧会 OR 特別公開 OR 開館) when:60d` : null;
+}
+
+// 見出しに出てくる館の名前
+export const hallOf = (title: string, halls: string[]) => halls.find((h) => title.includes(h)) ?? null;
+
 // 町の名前（どれか）と、催しの言葉（どれか）を含む、この30日の記事
 export function newsQuery(towns: string[]) {
   const names = towns.map((t) => `"${t}"`).join(" OR ");
