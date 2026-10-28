@@ -104,14 +104,15 @@ export default function Explorer() {
   const [plans, setPlans] = useState<Record<string, SavedPlan>>(() => (typeof window === "undefined" ? {} : readPlans()));
   // null なら自宅から出る
   const [away, setAway] = useState<Origin | null>(() => (typeof window === "undefined" ? null : readJson<Origin | null>(ORIGIN_KEY, null)));
-  const [tripDate, setTripDate] = useState<string>(() => (typeof window === "undefined" ? nextSaturday() : initialDate()));
+  const [tripDate, setTripDate] = useState<string>(() => (typeof window === "undefined" ? "" : initialDate()));
   const chooseDate = (d: string) => {
     if (!d) return;
     setTripDate(d);
     writeJson(DATE_KEY, d);
   };
+  // サーバーで組むときは今日がわからないので、日付は空のまま（その間は例祭の印を付けない）
   const trip = useMemo(() => {
-    const [y, m, d] = tripDate.split("-").map(Number);
+    const [y, m, d] = (tripDate || "1970-01-01").split("-").map(Number);
     return new Date(y, m - 1, d);
   }, [tripDate]);
   const [mode, setMode] = useState<Mode>(() => (typeof window === "undefined" ? "car" : readJson<Mode>(MODE_KEY, "car")));
