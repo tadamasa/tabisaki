@@ -31,23 +31,22 @@ const ROLE_CLASS: Record<Role, string> = {
   stay: "bg-inn text-white",
 };
 const MODE_ICON: Record<Mode, string> = { car: "🚗", train: "🚃", bike: "🚲", walk: "🚶" };
-const START_TIMES = [6, 7, 8, 9, 10].map((h) => h * 60);
-const START2_TIMES = [7, 8, 9, 10, 11].map((h) => h * 60);
+// 出発時刻は時と分を自由に選べる（端末の時刻入力を使う）
+const hhmm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 
-function TimeSelect({ value, times, label, onChange }: { value: number; times: number[]; label: string; onChange: (min: number) => void }) {
+function TimeInput({ value, label, onChange }: { value: number; label: string; onChange: (min: number) => void }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      className="rounded border border-border bg-surface px-1 py-0.5 text-sm text-foreground"
+    <input
+      type="time"
+      value={hhmm(value)}
+      onChange={(e) => {
+        const [h, m] = e.target.value.split(":").map(Number);
+        // 消しかけの途中（空）は無視する
+        if (Number.isFinite(h) && Number.isFinite(m)) onChange(h * 60 + m);
+      }}
+      className="min-h-8 rounded border border-border bg-surface px-1 py-0.5 text-sm tabular-nums text-foreground"
       aria-label={label}
-    >
-      {times.map((t) => (
-        <option key={t} value={t}>
-          {clock(t)}
-        </option>
-      ))}
-    </select>
+    />
   );
 }
 
@@ -241,7 +240,7 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
           <li className="flex items-center gap-2">
             <label className="flex items-center gap-1 text-muted">
               {plan.days > 1 && <span className="mr-1 text-xs font-semibold text-foreground">1日目</span>}
-              <TimeSelect value={plan.start} times={START_TIMES} label="出発時刻" onChange={onStart} />
+              <TimeInput value={plan.start} label="出発時刻" onChange={onStart} />
               {origin.label}を出る
             </label>
           </li>
@@ -289,7 +288,7 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
                 {s.role === "stay" && (
                   <li className="mt-2 flex items-center gap-1 text-muted">
                     <span className="mr-1 text-xs font-semibold text-foreground">{s.day + 1}日目</span>
-                    <TimeSelect value={plan.start2} times={START2_TIMES} label="2日目に宿を出る時刻" onChange={onStart2} />
+                    <TimeInput value={plan.start2} label="2日目に宿を出る時刻" onChange={onStart2} />
                     宿を出る
                   </li>
                 )}
