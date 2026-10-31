@@ -294,3 +294,33 @@ export function googleMapsRoutes(stops: Stop[], home: [number, number], mode: Mo
     })}`,
   }));
 }
+
+// 出発地のまわりのおすすめ。由緒の手がかりがある社と、博物館・美術館・城を、出発地から近い順に並べる。
+// 手がかりのある社がなければ、名前のわかる社も入れる
+const NEAR_MAX = 8;
+const NEAR_STOPS = 6;
+
+export function nearPicks(places: AreaPlaces, home: [number, number], n = NEAR_MAX) {
+  const shrines = places.anchors.filter((a) => a.score > 0);
+  const pool: Place[] = [...(shrines.length ? shrines : places.anchors), ...(places.halls ?? []), ...(places.castles ?? [])];
+  const seen = new Set<string>();
+  return pool
+    .filter((p) => !seen.has(p.id) && seen.add(p.id))
+    .map((place) => ({ place, km: Math.round(kmBetween(home, at(place)) * 10) / 10 }))
+    .sort((a, b) => a.km - b.km)
+    .slice(0, n);
+}
+
+// まわりのおすすめで行程を組む。いちばん近いおすすめを本命にし、近い順に、帰りが遅れない分だけ足す
+export function nearPlan(places: AreaPlaces, home: [number, number], start = 8 * 60, mode: Mode = "car", start2 = DEFAULT_START2): Stop[] {
+  const picks = nearPicks(places, home);
+  if (!picks.length) return [];
+  let stops: Stop[] = [{ place: picks[0].place, role: "anchor" }];
+  for (const { place } of picks.slice(1)) {
+    if (stops.length >= NEAR_STOPS) break;
+    const next = insertKin(stops, { place, role: place.kind === "shrine" ? "kin" : "extra" }, home, start, start2, mode);
+    if (schedule(next, home, start, start2, mode).overMin > 0) continue;
+    stops = next;
+  }
+  return optimizeOrder(stops, home, start, start2, mode);
+}

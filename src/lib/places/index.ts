@@ -3,6 +3,7 @@ import * as turf from "@turf/turf";
 import { cacheLife, cacheTag } from "next/cache";
 import type { AreaPlaces, Spot } from "@/lib/types";
 import { ATLAS_TAG, getAtlas, readBoundary } from "@/lib/atlas";
+import { circleBbox, kmFrom, nearArea, parseNearId } from "@/lib/nearArea";
 import { townArea } from "@/lib/townArea";
 import { type VisitedShrine, findDeityKin, findEn, findLineage } from "./en";
 import { type OsmElement, type Town, pairPrimer, rankPlaces } from "./rank";
@@ -121,7 +122,9 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
 
   const atlas = await getAtlas();
   // 地帯のほか、地図の町名から開いた1つの町（town-<コード>）も扱う
-  const single = townArea(atlas, areaId);
+  // 出発地のまわり（near:<緯度>,<経度>,<km>）も、行ったことのある町を含めて1つの範囲として扱う
+  const near = parseNearId(areaId);
+  const single = near ? nearArea(atlas, areaId) : townArea(atlas, areaId);
   const area = single ?? atlas.areas.find((a) => a.id === areaId);
   if (!area) return null;
 
@@ -145,7 +148,8 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
     // 行ったことのある町では、記録のある場所を除く（開いた町そのものが行ったことのある町のときも）
     towns.push({ id, name, geometry: f.geometry, outside: neighbors.has(id), visited: !!muni.get(id)?.visited });
   }
-  const bbox = round(turf.bbox(turf.featureCollection(towns.map((t) => turf.feature(t.geometry)))));
+  // まわりを探すときは、町の全体ではなく円を囲む枠だけを問い合わせる
+  const bbox = near ? round(circleBbox(near.at, near.km)) : round(turf.bbox(turf.featureCollection(towns.map((t) => turf.feature(t.geometry)))));
 
   // 行ったことのある町では、記録のある場所（近くにある、または同じ名前）を除く
   const spotsByMuni = new Map<string, Spot[]>();
@@ -157,7 +161,16 @@ export async function getAreaPlaces(areaId: string): Promise<AreaPlaces | null> 
       (s) => bare(s.name) === bare(name) || turf.distance([s.lng, s.lat], [lng, lat]) <= 0.2,
     );
 
-  const { elements, source } = await getOsm(bbox);
+  const osm = await getOsm(bbox);
+  const { source } = osm;
+  // まわりを探すときは円の中だけ。順位付けの前に絞るので、遠くの有名な社に枠を取られない
+  const elements = near
+    ? osm.elements.filter((el) => {
+        const lat = el.lat ?? el.center?.lat;
+        const lng = el.lon ?? el.center?.lon;
+        return lat != null && lng != null && (kmFrom(areaId, lat, lng) ?? 0) <= near.km;
+      })
+    : osm.elements;
   const ranked = rankPlaces(elements, towns, visitedHere);
 
   const visitedShrines = atlas.spots.filter((s) => s.cat === "shrine");

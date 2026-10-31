@@ -1,6 +1,7 @@
 import "server-only";
 import { cacheLife } from "next/cache";
 import { getAtlas } from "@/lib/atlas";
+import { nearArea } from "@/lib/nearArea";
 import { townArea } from "@/lib/townArea";
 import { getAreaPlaces } from "@/lib/places";
 import { type NewsItem, exhibitQuery, hallOf, newsQuery, parseNewsRss } from "./rss";
@@ -27,10 +28,11 @@ export type AreaNews = { items: NewsItem[]; exhibits: (NewsItem & { hall: string
 
 export async function getAreaNews(areaId: string): Promise<AreaNews | null> {
   const atlas = await getAtlas();
-  const area = townArea(atlas, areaId) ?? atlas.areas.find((a) => a.id === areaId);
+  const area = nearArea(atlas, areaId) ?? townArea(atlas, areaId) ?? atlas.areas.find((a) => a.id === areaId);
   if (!area) return null;
   // 「吉野」のような短い名前は別の意味でも出るので、「吉野町」のように市町村の名前で探す
-  const towns = area.towns.map((t) => (/[市区町村]$/.test(t.name) ? t.name : `${t.pref}${t.name}`));
+  // まわりを探すときは町が多いので、近い8町に絞る
+  const towns = area.towns.slice(0, 8).map((t) => (/[市区町村]$/.test(t.name) ? t.name : `${t.pref}${t.name}`));
   // 地帯の博物館・美術館の特別展・企画展。候補の館は地帯を開いたときに探してあるので、その覚えを使う
   const places = await getAreaPlaces(areaId).catch(() => null);
   const halls = (places?.halls ?? []).filter((h) => !h.outside).slice(0, MAX_HALLS).map((h) => h.name);

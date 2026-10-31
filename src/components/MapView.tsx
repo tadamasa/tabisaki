@@ -15,6 +15,8 @@ type Props = {
   areaIds: string[];
   origin: Origin;
   selected: BlankArea | null;
+  // 出発地のまわりを開いたときの円（町を塗る代わりに出す）
+  nearCircle: { at: [number, number]; km: number } | null;
   places: AreaPlaces | null;
   trip: Date;
   route: { home: [number, number]; stops: TimedStop[] } | null;
@@ -138,6 +140,17 @@ function renderActions(box: HTMLElement, place: Place, plan: PlanEdit) {
   button(inPlan ? "行程から外す" : "＋行程", inPlan ? HUE.nibi : HUE.ai, () => plan.onTogglePlace(place));
 }
 
+// 半径 km の円（64角形）
+const circleData = (c: Props["nearCircle"]): import("geojson").FeatureCollection => {
+  if (!c) return { type: "FeatureCollection", features: [] };
+  const [lng, lat] = c.at;
+  const ring = Array.from({ length: 65 }, (_, i) => {
+    const t = (i / 64) * 2 * Math.PI;
+    return [lng + (c.km / (111 * Math.cos((lat * Math.PI) / 180))) * Math.cos(t), lat + (c.km / 111) * Math.sin(t)];
+  });
+  return { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } }] };
+};
+
 const routeData = (route: Props["route"]): import("geojson").FeatureCollection => ({
   type: "FeatureCollection",
   features: route
@@ -154,7 +167,7 @@ const routeData = (route: Props["route"]): import("geojson").FeatureCollection =
     : [],
 });
 
-export default function MapView({ atlas, areaIds, origin, selected, places, trip, route, focus, onSelectArea, ...plan }: Props) {
+export default function MapView({ atlas, areaIds, origin, selected, nearCircle, places, trip, route, focus, onSelectArea, ...plan }: Props) {
   const { home } = atlas.summary;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -422,7 +435,21 @@ export default function MapView({ atlas, areaIds, origin, selected, places, trip
     if (!map) return;
     const apply = () => {
       if (!map.getLayer("muni-selected")) return;
-      map.setFilter("muni-selected", ["in", ["get", "id"], ["literal", selected?.towns.map((t) => t.id) ?? []]]);
+      // まわりを開いたときは、行ったことのある町まで塗らないよう、町ではなく円で示す
+      map.setFilter("muni-selected", ["in", ["get", "id"], ["literal", nearCircle ? [] : (selected?.towns.map((t) => t.id) ?? [])]]);
+      const circle = circleData(nearCircle);
+      const src = map.getSource("near-circle") as maplibregl.GeoJSONSource | undefined;
+      if (src) src.setData(circle);
+      else {
+        map.addSource("near-circle", { type: "geojson", data: circle });
+        map.addLayer({ id: "near-circle-fill", type: "fill", source: "near-circle", paint: { "fill-color": HUE.kanzo, "fill-opacity": 0.12 } });
+        map.addLayer({
+          id: "near-circle-line",
+          type: "line",
+          source: "near-circle",
+          paint: { "line-color": HUE.kanzo, "line-width": 2, "line-dasharray": [3, 2] },
+        });
+      }
       // 選んだ地帯が変わると名前の見た目も変わるので、作り直す
       selectedRef.current = selected;
       townLabelsRef.current.forEach((m) => m.remove());
@@ -441,7 +468,7 @@ export default function MapView({ atlas, areaIds, origin, selected, places, trip
     };
     if (map.getLayer("muni-selected")) apply();
     else map.once("load", apply);
-  }, [selected]);
+  }, [selected, nearCircle]);
 
   // 選んだ地帯の本命候補（赤）と予習先（青）を印で出す
   useEffect(() => {

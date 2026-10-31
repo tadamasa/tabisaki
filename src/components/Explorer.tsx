@@ -2,7 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_START2, type Mode, type Role, type Stop, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { DEFAULT_START2, type Mode, type Role, type Stop, nearPlan, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { NEAR_AREA_PREFIX, NEAR_KM, nearArea, nearAreaId, parseNearId } from "@/lib/nearArea";
 import { KIND } from "@/lib/kinds";
 import { DISTANCES, type Origin, fromOrigin, townCenters } from "@/lib/origin";
 import { townArea } from "@/lib/townArea";
@@ -163,18 +164,24 @@ function ExplorerView() {
   // 出発地からの距離で、地帯と町を近い順に並べ直す
   const near = useMemo(() => (data ? fromOrigin(data, centers, origin.at) : null), [data, centers, origin]);
   const areas = useMemo(() => (near?.areas ?? []).filter((a) => a.km < maxKm), [near, maxKm]);
+  // 出発地のまわりで、まだ記録のない場所を近い順に探す範囲
+  const nearKm = NEAR_KM[mode];
+  const nearId = nearAreaId(origin.at, nearKm);
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      for (const a of areas.slice(0, PREFETCH_COUNT)) {
+      // 出先では、まわりのおすすめを真っ先に取っておく
+      const first = origin.kind === "home" ? [] : [nearId];
+      for (const id of [...first, ...areas.slice(0, PREFETCH_COUNT).map((a) => a.id)]) {
         if (cancelled) return;
-        await loadPlaces(a.id);
+        await loadPlaces(id);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [areas]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areas, nearId]);
   // 一覧で指を置いた・カーソルを乗せた地帯も先に取りに行く
   const warm = (areaId: string) => {
     if (!places[areaId]) loadPlaces(areaId);
@@ -209,14 +216,19 @@ function ExplorerView() {
     }
   };
 
-  // 地図の町名から、地帯に入っていない町を1つだけ開くこともある
-  const townHere = (id: string) => {
-    const t = townArea(data!, id);
-    if (!t || !near) return t;
+  // 地図の町名から、地帯に入っていない町を1つだけ開くこともある。出発地のまわり（near:）も1つの範囲として開く。
+  // 描き直しのたびに地図が寄り直さないよう、選んだものが変わったときだけ作る
+  const selected = useMemo(() => {
+    if (!data || !selectedId || !near) return null;
+    const area = near.areas.find((a) => a.id === selectedId) ?? nearArea(data, selectedId, origin.label);
+    if (area) return area;
+    const t = townArea(data, selectedId);
+    if (!t) return null;
     const km = near.km.get(t.towns[0].id) ?? t.km;
     return { ...t, km, towns: t.towns.map((x) => ({ ...x, km })) };
-  };
-  const selected = data && selectedId ? (near?.areas.find((a) => a.id === selectedId) ?? townHere(selectedId)) : null;
+  }, [data, selectedId, near, origin.label]);
+  const nearCircle = useMemo(() => (selectedId ? parseNearId(selectedId) : null), [selectedId]);
+  const isNear = !!selectedId?.startsWith(NEAR_AREA_PREFIX);
   const selectedPlaces = selectedId ? places[selectedId] : undefined;
   const from = origin.at;
   const loaded = selectedPlaces && !("error" in selectedPlaces) ? selectedPlaces : null;
@@ -232,7 +244,9 @@ function ExplorerView() {
           const place = AREA_PLACE(loaded).get(id);
           return place ? [{ place, role, linkNext: link === 1, before }] : [];
         })
-      : suggestPlan(loaded, from, undefined, start, mode);
+      : loaded.areaId.startsWith(NEAR_AREA_PREFIX)
+        ? nearPlan(loaded, from, start, mode, start2)
+        : suggestPlan(loaded, from, undefined, start, mode);
   const plan = loaded ? schedule(stops, from, start, start2, mode) : null;
 
   const savePlan = (next: Stop[] | null, nextStart = start, nextStart2 = start2) => {
@@ -310,6 +324,7 @@ function ExplorerView() {
             areaIds={areas.map((a) => a.id)}
             origin={origin}
             selected={selected}
+            nearCircle={nearCircle}
             places={loaded}
             trip={trip}
             route={plan && plan.stops.length > 0 ? { home: from, stops: plan.stops } : null}
@@ -341,7 +356,7 @@ function ExplorerView() {
                 </button>
                 <h2 className="min-w-0 flex-1 truncate font-semibold">{selected.label}</h2>
                 <span className="shrink-0 text-xs text-muted">
-                  {selected.towns.length}町 ・ {selected.km}km〜
+                  {isNear ? `${selected.towns.length}町にまたがる` : `${selected.towns.length}町 ・ ${selected.km}km〜`}
                 </span>
               </div>
               <div className="mt-1 flex" role="tablist">
@@ -386,12 +401,17 @@ function ExplorerView() {
                     onFocus={setFocus}
                   />
                 ) : (
-                  <AreaPlacesPanel state={selectedPlaces} trip={trip} onRetry={() => retryPlaces(selected.id)} onFocus={setFocus} planIds={planIds} anchorId={anchorId} onToggle={togglePlace} onMakeAnchor={makeAnchor} />
+                  <AreaPlacesPanel state={selectedPlaces} trip={trip} home={from} onNearPlan={() => savePlan(null)} onRetry={() => retryPlaces(selected.id)} onFocus={setFocus} planIds={planIds} anchorId={anchorId} onToggle={togglePlace} onMakeAnchor={makeAnchor} />
                 )
               ) : (
                 <>
                   <AreaPlacesPanel
                     state={selectedPlaces}
+                    home={from}
+                    onNearPlan={() => {
+                      savePlan(null);
+                      setTab("plan");
+                    }}
                     trip={trip}
                     planIds={planIds}
                     anchorId={anchorId}
@@ -413,8 +433,8 @@ function ExplorerView() {
                 </>
               )}
               <TownGuide
-                towns={selected.towns}
-                title={near?.areas.some((a) => a.id === selected.id) ? "この地帯のまだ行っていない町" : "この町"}
+                towns={isNear ? selected.towns.slice(0, NEAR_TOWNS) : selected.towns}
+                title={isNear ? "まわりの町" : near?.areas.some((a) => a.id === selected.id) ? "この地帯のまだ行っていない町" : "この町"}
               />
             </div>
           </>
@@ -475,6 +495,22 @@ function ExplorerView() {
                       </button>
                     ))}
                   </div>
+                  {/* 地帯とは別に、出発地のすぐまわりで、まだ記録のない場所を近い順に出す */}
+                  <button
+                    type="button"
+                    onClick={() => selectArea(nearId)}
+                    onPointerEnter={() => warm(nearId)}
+                    onTouchStart={() => warm(nearId)}
+                    className="mt-3 flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border border-shrine/40 bg-shrine/5 px-3 text-left text-sm hover:bg-shrine/10"
+                  >
+                    <span>
+                      ✨ <span className="font-medium">近くのおすすめ</span>
+                      <span className="ml-1.5 text-xs text-muted">
+                        {origin.label}から{nearKm}km以内の、まだ行っていない場所
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs text-shrine">行程を組む →</span>
+                  </button>
                 </>
               )}
               <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">

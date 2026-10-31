@@ -1,7 +1,9 @@
 "use client";
 
 import { KIND } from "@/lib/kinds";
+import { NEAR_AREA_PREFIX } from "@/lib/nearArea";
 import { festivalNote } from "@/lib/places/festival";
+import { nearPicks } from "@/lib/plan/itinerary";
 import { TOWN_AREA_PREFIX } from "@/lib/townArea";
 import AreaNews from "./AreaNews";
 import { LinkChips, placeTarget } from "./Links";
@@ -88,6 +90,10 @@ type Props = {
   state: PlacesState;
   // 旅の日。前後に例祭がある社に印を付ける
   trip: Date;
+  // 出発地。まわりのおすすめを近い順に並べるのに使う
+  home: [number, number];
+  // まわりのおすすめを近い順に回る行程を組み直す
+  onNearPlan: () => void;
   onRetry: () => void;
   onFocus: (p: Place) => void;
   // 行程の編集
@@ -164,7 +170,7 @@ function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFoc
   );
 }
 
-export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan }: Props) {
+export default function AreaPlacesPanel({ state, trip, home, onNearPlan, onRetry, onFocus, ...plan }: Props) {
   if (!state)
     return (
       <p className="mt-3 text-sm text-muted">
@@ -185,8 +191,46 @@ export default function AreaPlacesPanel({ state, trip, onRetry, onFocus, ...plan
   const { anchors, primers, halls = [], castles = [], lodgings = [], shrineCount, source } = state;
   const infos = primers.filter((p) => p.kind === "info");
   const festive = anchors.filter((a) => festivalNote(a.reisai, trip));
+  const picks = state.areaId.startsWith(NEAR_AREA_PREFIX) ? nearPicks(state, home) : [];
   return (
     <div className="mt-4 space-y-4">
+      {state.areaId.startsWith(NEAR_AREA_PREFIX) && (
+        <section className="rounded-lg border border-shrine/40 bg-shrine/5 p-2.5">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="text-xs font-semibold tracking-wide text-shrine">✨ 近くのおすすめ（近い順）</h3>
+            {picks.length > 0 && (
+              <button type="button" onClick={onNearPlan} className="shrink-0 text-xs text-museum underline">
+                近い順で行程を組む
+              </button>
+            )}
+          </div>
+          {picks.length === 0 ? (
+            <p className="mt-1 text-sm text-muted">このあたりには、地図に載った社・館で、まだ行っていない場所が見つかりませんでした。移動手段を変えると、探す範囲が広がります。</p>
+          ) : (
+            <ol className="mt-1 divide-y divide-border/60 text-sm">
+              {picks.map(({ place, km }, i) => (
+                <li key={place.id} className="flex items-start justify-between gap-2 py-1.5">
+                  <span className="min-w-0">
+                    <span className="mr-1 text-xs tabular-nums text-muted">{i + 1}.</span>
+                    <span className="mr-1" aria-hidden>
+                      {KIND[place.kind].icon}
+                    </span>
+                    <PlaceName place={place} />
+                    <span className="ml-1.5 text-xs text-muted">
+                      {km}km ・ {place.town}
+                    </span>
+                    <FestivalBadge place={place} trip={trip} />
+                    {(place.shakaku?.length || place.reasons.length) ? (
+                      <span className="block text-[11px] text-muted">{[...(place.shakaku ?? []), ...place.reasons].filter((r, k, all) => all.indexOf(r) === k).join("・")}</span>
+                    ) : null}
+                  </span>
+                  <PlanButtons place={place} {...plan} />
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
       {festive.length > 0 && (
         <section className="rounded-lg border border-shrine/40 bg-shrine/5 p-2.5">
           <h3 className="text-xs font-semibold tracking-wide text-shrine">🏮 旅の日の前後に例祭がある社</h3>
