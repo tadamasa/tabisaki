@@ -70,6 +70,8 @@ export type Place = {
   // 社: 並び順の点数の内訳と、Wikipedia の基礎情報にある社格
   basis?: { key: string; label: string; pts: number }[];
   shakaku?: string[];
+  // 社: Wikipedia の基礎情報にある例祭（「10月17日」「4月第2日曜日」など）
+  reisai?: string;
 };
 
 export type AreaPlaces = {

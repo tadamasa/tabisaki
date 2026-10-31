@@ -1,26 +1,16 @@
 "use client";
 
+import { KIND } from "@/lib/kinds";
+import { NEAR_AREA_PREFIX } from "@/lib/nearArea";
+import { festivalNote } from "@/lib/places/festival";
+import { nearPicks } from "@/lib/plan/itinerary";
 import { TOWN_AREA_PREFIX } from "@/lib/townArea";
+import AreaNews from "./AreaNews";
+import { LinkChips, placeTarget } from "./Links";
 import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
 export type PlacesState = AreaPlaces | { error: string } | undefined;
 
-const KIND_LABEL: Record<Place["kind"], string> = {
-  shrine: "神社",
-  museum: "資料館・博物館",
-  art: "美術館",
-  castle: "城・城跡",
-  info: "観光案内所",
-  lodging: "宿",
-};
-const DOT: Record<Place["kind"], string> = {
-  shrine: "bg-shrine",
-  museum: "bg-museum",
-  art: "bg-art",
-  castle: "bg-castle",
-  info: "bg-museum",
-  lodging: "bg-inn",
-};
 const innSearchLink = (p: Place) => `https://www.google.com/search?q=${encodeURIComponent(`${p.name} ${p.town} 宿泊予約`)}`;
 
 const mapsLink = (p: Place) =>
@@ -30,6 +20,16 @@ function PlaceName({ place }: { place: Place }) {
   return (
     <a href={place.wikipedia ?? mapsLink(place)} target="_blank" rel="noreferrer" className="font-medium underline-offset-2 hover:underline">
       {place.name}
+    </a>
+  );
+}
+
+// 地図に登録された公式サイト
+function SiteLink({ place }: { place: Place }) {
+  if (!place.website || !/^https?:\/\//.test(place.website)) return null;
+  return (
+    <a href={place.website} target="_blank" rel="noreferrer" className="ml-1.5 text-xs text-museum underline">
+      公式サイト
     </a>
   );
 }
@@ -69,12 +69,31 @@ function RankNote({ place }: { place: Place }) {
     <p className="mt-1.5 text-xs text-muted">
       <span className="font-medium text-foreground">社格</span>{" "}
       {place.shakaku?.length ? place.shakaku.join("・") : "記事に記載が見つかりませんでした"}
+      {place.reisai && (
+        <>
+          {" "}
+          ・ <span className="font-medium text-foreground">例祭</span> {place.reisai}
+        </>
+      )}
     </p>
   );
 }
 
+// 旅の日の前後に例祭がある社の印
+export function FestivalBadge({ place, trip }: { place: Place; trip: Date }) {
+  const note = festivalNote(place.reisai, trip);
+  if (!note) return null;
+  return <span className="ml-1.5 inline-block rounded-full bg-shrine px-1.5 text-[11px] font-medium text-white">🏮 {note}</span>;
+}
+
 type Props = {
   state: PlacesState;
+  // 旅の日。前後に例祭がある社に印を付ける
+  trip: Date;
+  // 出発地。まわりのおすすめを近い順に並べるのに使う
+  home: [number, number];
+  // まわりのおすすめを近い順に回る行程を組み直す
+  onNearPlan: () => void;
   onRetry: () => void;
   onFocus: (p: Place) => void;
   // 行程の編集
@@ -130,24 +149,28 @@ function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFoc
   return (
     <li className="flex items-start justify-between gap-2 py-1.5">
       <span className="min-w-0">
-        <span className={`mr-1.5 inline-block size-2 rounded-full ${DOT[place.kind]}`} />
+        <span className="mr-1" aria-hidden>
+          {KIND[place.kind].icon}
+        </span>
         <PlaceName place={place} />
         <span className="ml-1.5 text-xs text-muted">
-          {KIND_LABEL[place.kind]} ・ {place.town}
+          {KIND[place.kind].label} ・ {place.town}
         </span>{" "}
         <button type="button" onClick={() => onFocus(place)} className="text-xs text-museum underline">
           地図
         </button>
+        <SiteLink place={place} />
         {place.reasons.length > 0 && (
           <span className="ml-1.5 text-[11px] text-muted">{place.reasons.join("・")}</span>
         )}
+        <LinkChips target={placeTarget(place)} />
       </span>
       <PlanButtons place={place} {...plan} />
     </li>
   );
 }
 
-export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Props) {
+export default function AreaPlacesPanel({ state, trip, home, onNearPlan, onRetry, onFocus, ...plan }: Props) {
   if (!state)
     return (
       <p className="mt-3 text-sm text-muted">
@@ -167,11 +190,67 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
 
   const { anchors, primers, halls = [], castles = [], lodgings = [], shrineCount, source } = state;
   const infos = primers.filter((p) => p.kind === "info");
+  const festive = anchors.filter((a) => festivalNote(a.reisai, trip));
+  const picks = state.areaId.startsWith(NEAR_AREA_PREFIX) ? nearPicks(state, home) : [];
   return (
     <div className="mt-4 space-y-4">
+      {state.areaId.startsWith(NEAR_AREA_PREFIX) && (
+        <section className="rounded-lg border border-shrine/40 bg-shrine/5 p-2.5">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="text-xs font-semibold tracking-wide text-shrine">✨ 近くのおすすめ（近い順）</h3>
+            {picks.length > 0 && (
+              <button type="button" onClick={onNearPlan} className="shrink-0 text-xs text-museum underline">
+                近い順で行程を組む
+              </button>
+            )}
+          </div>
+          {picks.length === 0 ? (
+            <p className="mt-1 text-sm text-muted">このあたりには、地図に載った社・館で、まだ行っていない場所が見つかりませんでした。移動手段を変えると、探す範囲が広がります。</p>
+          ) : (
+            <ol className="mt-1 divide-y divide-border/60 text-sm">
+              {picks.map(({ place, km }, i) => (
+                <li key={place.id} className="flex items-start justify-between gap-2 py-1.5">
+                  <span className="min-w-0">
+                    <span className="mr-1 text-xs tabular-nums text-muted">{i + 1}.</span>
+                    <span className="mr-1" aria-hidden>
+                      {KIND[place.kind].icon}
+                    </span>
+                    <PlaceName place={place} />
+                    <span className="ml-1.5 text-xs text-muted">
+                      {km}km ・ {place.town}
+                    </span>
+                    <FestivalBadge place={place} trip={trip} />
+                    {(place.shakaku?.length || place.reasons.length) ? (
+                      <span className="block text-[11px] text-muted">{[...(place.shakaku ?? []), ...place.reasons].filter((r, k, all) => all.indexOf(r) === k).join("・")}</span>
+                    ) : null}
+                  </span>
+                  <PlanButtons place={place} {...plan} />
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
+      {festive.length > 0 && (
+        <section className="rounded-lg border border-shrine/40 bg-shrine/5 p-2.5">
+          <h3 className="text-xs font-semibold tracking-wide text-shrine">🏮 旅の日の前後に例祭がある社</h3>
+          <ul className="mt-1 space-y-1 text-sm">
+            {festive.map((a) => (
+              <li key={a.id} className="flex items-start justify-between gap-2">
+                <span>
+                  <PlaceName place={a} />
+                  <FestivalBadge place={a} trip={trip} />
+                  <span className="ml-1.5 text-xs text-muted">例祭 {a.reisai}</span>
+                </span>
+                <PlanButtons place={a} {...plan} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section>
         <h3 className="text-xs font-semibold tracking-wide text-muted">
-          神社（{state.areaId.startsWith(TOWN_AREA_PREFIX) ? "この町" : "地帯"}の {shrineCount} 社から）
+          ⛩️ 神社（{state.areaId.startsWith(TOWN_AREA_PREFIX) ? "この町" : "地帯"}の {shrineCount} 社から）
         </h3>
         {anchors.length === 0 ? (
           <p className="mt-1 text-sm text-muted">名前のわかる神社が見つかりませんでした。</p>
@@ -181,9 +260,13 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
               <li key={a.id} className="rounded-lg border border-border p-2.5">
                 <div className="flex items-baseline justify-between gap-2">
                   <span>
-                    <span className="mr-1.5 inline-block size-2 rounded-full bg-shrine" />
+                    <span className="mr-1" aria-hidden>
+                      ⛩️
+                    </span>
                     <PlaceName place={a} />
                     <span className="ml-1.5 text-xs text-muted">{a.town}</span>
+                    <FestivalBadge place={a} trip={trip} />
+                    <SiteLink place={a} />
                   </span>
                   <button type="button" onClick={() => onFocus(a)} className="shrink-0 text-xs text-museum underline">
                     地図
@@ -212,6 +295,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
                     で予習 → 本命へ（約 {a.primer.km} km）
                   </p>
                 )}
+                <LinkChips target={placeTarget(a)} />
               </li>
             ))}
           </ol>
@@ -219,7 +303,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
       </section>
 
       <section>
-        <h3 className="text-xs font-semibold tracking-wide text-muted">博物館・美術館・資料館</h3>
+        <h3 className="text-xs font-semibold tracking-wide text-muted">🏛️ 博物館・美術館・資料館</h3>
         {halls.length === 0 ? (
           <p className="mt-1 text-sm text-muted">地帯の中には見つかりませんでした。隣の町を探すのがよさそうです。</p>
         ) : (
@@ -233,7 +317,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
 
       {castles.length > 0 && (
         <section>
-          <h3 className="text-xs font-semibold tracking-wide text-muted">城・城跡</h3>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">🏯 城・城跡</h3>
           <ul className="mt-1 divide-y divide-border text-sm">
             {castles.map((p) => (
               <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
@@ -244,7 +328,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
 
       {infos.length > 0 && (
         <section>
-          <h3 className="text-xs font-semibold tracking-wide text-muted">観光案内所</h3>
+          <h3 className="text-xs font-semibold tracking-wide text-muted">ℹ️ 観光案内所</h3>
           <ul className="mt-1 divide-y divide-border text-sm">
             {infos.map((p) => (
               <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
@@ -253,7 +337,7 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
         </section>
       )}
       <section>
-        <h3 className="text-xs font-semibold tracking-wide text-muted">宿</h3>
+        <h3 className="text-xs font-semibold tracking-wide text-muted">♨️ 宿</h3>
         {lodgings.length === 0 ? (
           <p className="mt-1 text-sm text-muted">地帯とその隣の町には、地図に載った宿が見つかりませんでした。</p>
         ) : (
@@ -267,8 +351,9 @@ export default function AreaPlacesPanel({ state, onRetry, onFocus, ...plan }: Pr
           </>
         )}
       </section>
+      <AreaNews areaId={state.areaId} />
       <p className="text-[11px] text-muted">
-        出典: {source}。社格などは名前と登録情報からの推定です。「行ったことのある町」は、地帯の隣で訪問済みの町にある、まだ記録のない場所です。
+        出典: {source}。例祭は Wikipedia の基礎情報から（旧暦の日付は数えていません）。社格などは名前と登録情報からの推定です。「行ったことのある町」は、地帯の隣で訪問済みの町にある、まだ記録のない場所です。
       </p>
     </div>
   );

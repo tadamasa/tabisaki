@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AreaPlaces, Place } from "@/lib/types";
-import { DAY_END, INN_BY, blocksOf, driveMinutes, googleMapsRoutes, insertKin, optimizeOrder, roleFor, schedule, suggestPlan } from "./itinerary";
+import { DAY_END, INN_BY, blocksOf, driveMinutes, googleMapsLeg, googleMapsRoutes, nearPicks, nearPlan, travel, insertKin, optimizeOrder, roleFor, schedule, suggestPlan } from "./itinerary";
 
 const home: [number, number] = [135.5157, 34.7617];
 const place = (id: string, kind: Place["kind"], lng: number, lat: number, score = 0): Place => ({
@@ -200,4 +200,38 @@ test("回る場所が少なければ、宿に昼過ぎに着くより1日目に�
   const naive = schedule([few[0], { place: inn, role: "stay" }, ...few.slice(1)], home, 8 * 60, 9 * 60);
   assert.ok(plan.earlyMin < naive.earlyMin);
   assert.ok(atInn >= 1);
+});
+
+test("移動手段で時間が変わり、電車では近い地点のあいだを歩く", () => {
+  const a: [number, number] = [135.5, 34.7];
+  const near: [number, number] = [135.505, 34.7];
+  const far: [number, number] = [135.9, 34.4];
+  assert.ok(travel(a, far, "walk").min > travel(a, far, "bike").min);
+  assert.ok(travel(a, far, "bike").min > travel(a, far, "car").min);
+  assert.equal(travel(a, near, "train").by, "walk");
+  assert.equal(travel(a, far, "train").by, "train");
+  const nextDoor = place("隣の社", "shrine", 135.875, 34.372);
+  const plan = schedule([{ place: main, role: "anchor" }, { place: nextDoor, role: "kin" }], home, 8 * 60, 9 * 60, "train");
+  assert.equal(plan.stops[0].by, "train");
+  assert.equal(plan.stops[1].by, "walk");
+});
+
+test("歩きでは遠いゆかりの社を入れず、Googleマップも歩きの経路で開く", () => {
+  const here: [number, number] = [135.865, 34.385];
+  const stops = suggestPlan(areaPlaces, here, undefined, 8 * 60, "walk");
+  assert.equal(schedule(stops, here, 8 * 60, 9 * 60, "walk").overMin, 0);
+  const url = new URL(googleMapsRoutes(stops, here, "walk")[0].url);
+  assert.equal(url.searchParams.get("travelmode"), "walking");
+  assert.equal(new URL(googleMapsLeg(here, [135.9, 34.4], "train")).searchParams.get("travelmode"), "transit");
+});
+
+test("まわりのおすすめは近い順に並べ、いちばん近いものを本命に、帰りが遅れない分だけ行程に入れる", () => {
+  const here: [number, number] = [135.865, 34.385];
+  const picks = nearPicks(areaPlaces, here);
+  assert.ok(picks.every((p, i) => i === 0 || picks[i - 1].km <= p.km));
+  assert.ok(!picks.some((p) => p.place.id === "同系統の社"), "手がかりのない社は、手がかりのある社があれば出さない");
+  const stops = nearPlan(areaPlaces, here, 9 * 60, "walk");
+  assert.equal(stops.find((s) => s.role === "anchor")?.place.id, picks[0].place.id);
+  assert.equal(schedule(stops, here, 9 * 60, 9 * 60, "walk").overMin, 0);
+  assert.ok(!stops.some((s) => s.place.id === "遠い社"));
 });

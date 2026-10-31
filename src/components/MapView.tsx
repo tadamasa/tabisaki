@@ -2,14 +2,23 @@
 
 import maplibregl, { type FilterSpecification, type MapGeoJSONFeature } from "maplibre-gl";
 import { useEffect, useRef } from "react";
+import type { Origin } from "@/lib/origin";
+import { kmBetween } from "@/lib/origin";
+import { HUE, KIND } from "@/lib/kinds";
+import { festivalNote } from "@/lib/places/festival";
 import type { TimedStop } from "@/lib/plan/itinerary";
 import type { AreaPlaces, Atlas, BlankArea, MuniProps, Place, Spot } from "@/lib/types";
 
 type Props = {
   atlas: Atlas;
-  maxKm: number;
+  // 出発地からの距離で絞り込んだ地帯
+  areaIds: string[];
+  origin: Origin;
   selected: BlankArea | null;
+  // 出発地のまわりを開いたときの円（町を塗る代わりに出す）
+  nearCircle: { at: [number, number]; km: number } | null;
   places: AreaPlaces | null;
+  trip: Date;
   route: { home: [number, number]; stops: TimedStop[] } | null;
   focus: Place | null;
   onSelectArea: (areaId: string | null) => void;
@@ -34,31 +43,11 @@ const CATEGORY_LABEL: Record<Spot["cat"], string> = {
   other: "その他",
 };
 
-const PLACE_LABEL: Record<Place["kind"], string> = {
-  shrine: "神社",
-  museum: "資料館・博物館",
-  art: "美術館",
-  castle: "城・城跡",
-  info: "観光案内所",
-  lodging: "宿",
-};
-const PLACE_BG: Record<Place["kind"], string> = {
-  shrine: "bg-shrine",
-  museum: "bg-museum",
-  art: "bg-art",
-  castle: "bg-castle",
-  info: "bg-museum",
-  lodging: "bg-inn",
-};
 
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-const areaFilter = (maxKm: number): FilterSpecification => [
-  "all",
-  ["to-boolean", ["get", "area"]],
-  ["<", ["get", "km"], maxKm],
-];
+const areaFilter = (areaIds: string[]): FilterSpecification => ["in", ["get", "area"], ["literal", areaIds]];
 
 // この縮尺より寄ったら、見えている範囲のすべての市町村に名前を出す（開いた地帯の町はいつでも出す）
 const ALL_TOWN_LABEL_ZOOM = 8.5;
@@ -83,17 +72,19 @@ function label(text: string, kind: "town" | "visited-town" | "other-town" | "spo
 }
 
 // 市町村の吹き出し。まだの町は地帯ごと、行ったことのある町はその町だけの候補を読み込める
-function muniPopup(p: MuniProps, [lng, lat]: [number, number], onLoad: (areaId: string) => void) {
+function muniPopup(p: MuniProps, [lng, lat]: [number, number], origin: () => Origin, onLoad: (areaId: string) => void) {
   const status = p.visited ? `訪問 ${p.visits} 件 ・ 最後 ${formatDate(p.last)}` : "まだ記録がありません";
   const content = document.createElement("div");
   const info = document.createElement("div");
-  info.innerHTML = `<strong>${escapeHtml(p.name)}</strong><br>${status}<br>自宅から約 ${p.km} km${mapLinks(lng, lat, p.name)}`;
+  const o = origin();
+  const km = Math.round(kmBetween(o.at, [lng, lat]));
+  info.innerHTML = `<strong>${escapeHtml(p.name)}</strong><br>${status}<br>${escapeHtml(o.label)}から約 ${km} km${mapLinks(lng, lat, p.name)}`;
   const area = p.area && p.area !== "null" ? p.area : null;
   const b = document.createElement("button");
   b.type = "button";
   b.textContent = area ? "この地帯の候補を探す" : "この町の候補を探す";
   b.style.cssText =
-    "margin-top:8px;min-height:32px;padding:0 12px;border-radius:999px;border:1px solid #3b6fb6;color:#3b6fb6;background:#fff;font-size:13px;cursor:pointer";
+    `margin-top:8px;min-height:32px;padding:0 12px;border-radius:999px;border:1px solid ${HUE.ai};color:${HUE.ai};background:#fff;font-size:13px;cursor:pointer`;
   content.append(info, b);
   const popup = new maplibregl.Popup({ offset: 14, maxWidth: "280px" }).setDOMContent(content);
   b.addEventListener("click", () => {
@@ -114,7 +105,7 @@ function bboxOf(g: import("geojson").Polygon | import("geojson").MultiPolygon) {
 
 const formatDate = (ts: string | null) => (ts ? ts.slice(0, 10).replaceAll("-", "/") : "—");
 
-const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: "#3b6fb6", anchor: "#c2412d", kin: "#e07a5f", extra: "#7b4fa0", stay: "#3f7a46" };
+const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: HUE.ai, anchor: HUE.shu, kin: "#e07a5f", extra: HUE.edomurasaki, stay: HUE.chitose };
 
 // 宿の空きを調べる検索（予約サイトを1つに決めない）
 export const innSearchLink = (p: Place) =>
@@ -136,18 +127,29 @@ function renderActions(box: HTMLElement, place: Place, plan: PlanEdit) {
   if (place.id === plan.anchorId) {
     const s = document.createElement("span");
     s.textContent = "行程の本命です";
-    s.style.cssText = "color:#c2412d;font-size:13px;font-weight:600";
+    s.style.cssText = `color:${HUE.shu};font-size:13px;font-weight:600`;
     box.append(s);
     return;
   }
   const inPlan = plan.planIds.has(place.id);
   if (place.kind === "lodging") {
-    button(inPlan ? "泊まるのをやめる" : "ここに泊まる", inPlan ? "#6b665c" : "#3f7a46", () => plan.onTogglePlace(place));
+    button(inPlan ? "泊まるのをやめる" : "ここに泊まる", inPlan ? HUE.nibi : HUE.chitose, () => plan.onTogglePlace(place));
     return;
   }
-  if (place.kind !== "info") button("本命にする", "#c2412d", () => plan.onMakeAnchor(place));
-  button(inPlan ? "行程から外す" : "＋行程", inPlan ? "#6b665c" : "#3b6fb6", () => plan.onTogglePlace(place));
+  if (place.kind !== "info") button("本命にする", HUE.shu, () => plan.onMakeAnchor(place));
+  button(inPlan ? "行程から外す" : "＋行程", inPlan ? HUE.nibi : HUE.ai, () => plan.onTogglePlace(place));
 }
+
+// 半径 km の円（64角形）
+const circleData = (c: Props["nearCircle"]): import("geojson").FeatureCollection => {
+  if (!c) return { type: "FeatureCollection", features: [] };
+  const [lng, lat] = c.at;
+  const ring = Array.from({ length: 65 }, (_, i) => {
+    const t = (i / 64) * 2 * Math.PI;
+    return [lng + (c.km / (111 * Math.cos((lat * Math.PI) / 180))) * Math.cos(t), lat + (c.km / 111) * Math.sin(t)];
+  });
+  return { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } }] };
+};
 
 const routeData = (route: Props["route"]): import("geojson").FeatureCollection => ({
   type: "FeatureCollection",
@@ -165,7 +167,7 @@ const routeData = (route: Props["route"]): import("geojson").FeatureCollection =
     : [],
 });
 
-export default function MapView({ atlas, maxKm, selected, places, route, focus, onSelectArea, ...plan }: Props) {
+export default function MapView({ atlas, areaIds, origin, selected, nearCircle, places, trip, route, focus, onSelectArea, ...plan }: Props) {
   const { home } = atlas.summary;
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -189,6 +191,11 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
       if (popup.isOpen()) renderActions(box, place, plan);
     }
   });
+  const originRef = useRef(origin);
+  useEffect(() => {
+    originRef.current = origin;
+  }, [origin]);
+  const originMarkerRef = useRef<maplibregl.Marker | null>(null);
   const onSelectRef = useRef(onSelectArea);
   useEffect(() => {
     onSelectRef.current = onSelectArea;
@@ -220,7 +227,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         p.id,
         new maplibregl.Marker({ element: el })
           .setLngLat(at)
-          .setPopup(muniPopup(p, at, (id) => onSelectRef.current(id)))
+          .setPopup(muniPopup(p, at, () => originRef.current, (id) => onSelectRef.current(id)))
           .addTo(map),
       );
     }
@@ -245,7 +252,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
           },
         },
         layers: [
-          { id: "bg", type: "background", paint: { "background-color": "#efece4" } },
+          { id: "bg", type: "background", paint: { "background-color": HUE.kinari } },
           { id: "gsi", type: "raster", source: "gsi" },
         ],
       },
@@ -261,27 +268,27 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         type: "fill",
         source: "munis",
         filter: ["==", ["get", "visited"], true],
-        paint: { "fill-color": "#2f8f83", "fill-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0.42, 12, 0.18] },
+        paint: { "fill-color": HUE.seiji, "fill-opacity": ["interpolate", ["linear"], ["zoom"], 7, 0.42, 12, 0.18] },
       });
       map.addLayer({
         id: "muni-area",
         type: "fill",
         source: "munis",
-        filter: areaFilter(maxKm),
-        paint: { "fill-color": "#d9822b", "fill-opacity": 0.14 },
+        filter: areaFilter(areaIds),
+        paint: { "fill-color": HUE.kanzo, "fill-opacity": 0.16 },
       });
       map.addLayer({
         id: "muni-selected",
         type: "fill",
         source: "munis",
         filter: ["==", ["get", "area"], "__none__"],
-        paint: { "fill-color": "#d9822b", "fill-opacity": 0.55 },
+        paint: { "fill-color": HUE.kanzo, "fill-opacity": 0.55 },
       });
       map.addLayer({
         id: "muni-line",
         type: "line",
         source: "munis",
-        paint: { "line-color": "#6b665c", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.2, 10, 1] },
+        paint: { "line-color": HUE.nibi, "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.2, 10, 1] },
       });
 
       map.addSource("spots", {
@@ -306,9 +313,9 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
             "match",
             ["get", "cat"],
             "shrine",
-            "#c2412d",
+            HUE.shu,
             "museum",
-            "#3b6fb6",
+            HUE.ai,
             "#7a7466",
           ],
           "circle-stroke-color": "#ffffff",
@@ -316,7 +323,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
         },
       });
 
-      new maplibregl.Marker({ color: "#23211c" })
+      new maplibregl.Marker({ color: HUE.sumi })
         .setLngLat(home)
         .setPopup(new maplibregl.Popup({ offset: 24 }).setText("自宅"))
         .addTo(map);
@@ -398,18 +405,51 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
     if (!map) return;
     const apply = () => {
       if (!map.getLayer("muni-area")) return;
-      map.setFilter("muni-area", areaFilter(maxKm));
+      map.setFilter("muni-area", areaFilter(areaIds));
     };
     if (map.getLayer("muni-area")) apply();
     else map.once("load", apply);
-  }, [maxKm]);
+    // 中身が同じなら掛け直さない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areaIds.join(",")]);
+
+  // 自宅以外から出るときは、出発地に印を立てて、そこへ寄る
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    originMarkerRef.current?.remove();
+    originMarkerRef.current = null;
+    if (origin.kind === "home") return;
+    const el = document.createElement("div");
+    el.className = "grid size-7 place-items-center rounded-full bg-foreground text-sm shadow ring-2 ring-white";
+    el.textContent = origin.kind === "here" ? "📍" : "🏨";
+    originMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat(origin.at)
+      .setPopup(new maplibregl.Popup({ offset: 16 }).setText(`出発地: ${origin.label}`))
+      .addTo(map);
+    if (!selectedRef.current) map.flyTo({ center: origin.at, zoom: Math.max(map.getZoom(), 9) });
+  }, [origin]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const apply = () => {
       if (!map.getLayer("muni-selected")) return;
-      map.setFilter("muni-selected", ["in", ["get", "id"], ["literal", selected?.towns.map((t) => t.id) ?? []]]);
+      // まわりを開いたときは、行ったことのある町まで塗らないよう、町ではなく円で示す
+      map.setFilter("muni-selected", ["in", ["get", "id"], ["literal", nearCircle ? [] : (selected?.towns.map((t) => t.id) ?? [])]]);
+      const circle = circleData(nearCircle);
+      const src = map.getSource("near-circle") as maplibregl.GeoJSONSource | undefined;
+      if (src) src.setData(circle);
+      else {
+        map.addSource("near-circle", { type: "geojson", data: circle });
+        map.addLayer({ id: "near-circle-fill", type: "fill", source: "near-circle", paint: { "fill-color": HUE.kanzo, "fill-opacity": 0.12 } });
+        map.addLayer({
+          id: "near-circle-line",
+          type: "line",
+          source: "near-circle",
+          paint: { "line-color": HUE.kanzo, "line-width": 2, "line-dasharray": [3, 2] },
+        });
+      }
       // 選んだ地帯が変わると名前の見た目も変わるので、作り直す
       selectedRef.current = selected;
       townLabelsRef.current.forEach((m) => m.remove());
@@ -428,7 +468,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
     };
     if (map.getLayer("muni-selected")) apply();
     else map.once("load", apply);
-  }, [selected]);
+  }, [selected, nearCircle]);
 
   // 選んだ地帯の本命候補（赤）と予習先（青）を印で出す
   useEffect(() => {
@@ -440,14 +480,19 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
     if (!places) return;
     for (const p of [...places.primers, ...(places.halls ?? []), ...(places.castles ?? []), ...(places.lodgings ?? []), ...places.anchors]) {
       if (placeMarkersRef.current.has(p.id)) continue;
+      const festival = festivalNote(p.reisai, trip);
       const el = document.createElement("div");
-      el.className = `size-3.5 cursor-pointer rounded-full ring-2 ring-white shadow ${PLACE_BG[p.kind]}`;
+      // 種類のアイコンを、種類の色で縁取った丸に入れる。旅の日の前後に例祭がある社は、金の縁で大きく出す
+      el.className = `place-pin${festival ? " festive" : ""}`;
+      el.style.setProperty("--pin", KIND[p.kind].color);
+      el.textContent = KIND[p.kind].icon;
       el.title = p.name;
       const content = document.createElement("div");
       const info = document.createElement("div");
       info.innerHTML =
-        `<strong>${escapeHtml(p.name)}</strong><br>${PLACE_LABEL[p.kind]} ・ ${escapeHtml(p.town)}` +
+        `<strong>${escapeHtml(p.name)}</strong><br>${KIND[p.kind].icon} ${KIND[p.kind].label} ・ ${escapeHtml(p.town)}` +
         (p.shakaku?.length ? `<br>社格: ${p.shakaku.map(escapeHtml).join("・")}` : "") +
+        (p.reisai ? `<br>例祭: ${escapeHtml(p.reisai)}${festival ? ` <b style="color:${HUE.shu}">🏮 ${festival}</b>` : ""}` : "") +
         (p.reasons.length ? `<br>${p.reasons.map(escapeHtml).join("・")}` : "") +
         (p.wikipedia ? `<br><a href="${escapeHtml(p.wikipedia)}" target="_blank" rel="noreferrer">Wikipedia</a>` : "") +
         (p.kind === "lodging" ? `<br><a href="${escapeHtml(innSearchLink(p))}" target="_blank" rel="noreferrer">空室・料金を調べる</a>` : "") +
@@ -460,7 +505,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
       actionBoxesRef.current.set(p.id, { box, place: p, popup });
       placeMarkersRef.current.set(p.id, new maplibregl.Marker({ element: el }).setLngLat([p.lng, p.lat]).setPopup(popup).addTo(map));
     }
-  }, [places]);
+  }, [places, trip]);
 
   // 行程の順路（自宅→各地点→自宅）を線と番号で出す。線は道ではなく、回る順の目安
   useEffect(() => {
@@ -476,7 +521,7 @@ export default function MapView({ atlas, maxKm, selected, places, route, focus, 
           type: "line",
           source: "route",
           layout: { "line-join": "round", "line-cap": "round" },
-          paint: { "line-color": "#23211c", "line-width": 2.5, "line-opacity": 0.7, "line-dasharray": [2, 1.5] },
+          paint: { "line-color": HUE.sumi, "line-width": 2.5, "line-opacity": 0.7, "line-dasharray": [2, 1.5] },
         });
       }
       routeMarkersRef.current.forEach((m) => m.remove());

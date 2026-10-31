@@ -47,3 +47,4 @@ next-env.d.ts
 *.xlsx
 /.terrain-cache/
 __pycache__/
+.links.local.json
