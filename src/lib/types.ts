@@ -18,6 +18,9 @@ export type Spot = {
   cat: "shrine" | "temple" | "museum" | "history" | "nature" | "other";
   muni: string | null;
   note: string | null;
+  // 同じ場所（縁泉の actant）への記録の数と、最初の記録の日時。ts は最後の記録
+  visits?: number;
+  first?: string;
 };
 
 export type Summary = {
