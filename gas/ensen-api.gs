@@ -1,5 +1,5 @@
 /**
- * 縁泉スプレッドシートの「場所」の記録を tabisaki に渡し、tabisaki で登録した資料のリンクを「links」シートに読み書きする Web API。
+ * 縁泉スプレッドシートの「場所」の記録を（spot_fixes で直した位置を重ねて）tabisaki に渡し、tabisaki で登録した資料のリンクを「links」シートに読み書きする Web API。
  *
  * 使い方（縁泉本体とは別の Apps Script プロジェクトとして作る）
  * 1. https://script.google.com で新しいプロジェクトを作り、このファイルの中身を貼る
@@ -25,7 +25,7 @@
  *   url          資料の URL（Google ドライブの共有リンクなど）
  *   note         メモ
  */
-const COLUMNS = ['event_id', 'ts', 'lat', 'lng', 'actant_type', 'actant_name', 'note', 'tags'];
+const COLUMNS = ['event_id', 'ts', 'lat', 'lng', 'actant_type', 'actant_name', 'actant_id', 'note', 'tags'];
 const LINK_COLUMNS = ['link_id', 'created_at', 'target_type', 'target_id', 'target_name', 'muni_code', 'lat', 'lng', 'title', 'url', 'note'];
 
 function doGet(e) {
@@ -39,15 +39,67 @@ function doGet(e) {
   const header = values[0];
   const index = COLUMNS.map((c) => header.indexOf(c));
   const typeCol = header.indexOf('actant_type');
+  const fixes = latestSpotFixes_(book);
   const events = [];
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
     if (row[typeCol] !== '場所') continue;
     const item = {};
     COLUMNS.forEach((c, i) => (item[c] = index[i] >= 0 ? row[index[i]] : null));
+    const fix = item.actant_id ? fixes[item.actant_id] : undefined;
+    if (fix && fix.status === 'hide') continue; // 位置不明にした場所は返さない
+    if (fix && fix.status === 'move') {
+      item.lat = String(fix.lat);
+      item.lng = String(fix.lng);
+    }
     events.push(item);
   }
   return json_({ updatedAt: new Date().toISOString(), events: events });
+}
+
+/*
+ * 縁泉アプリで直したスポットの位置（spot_fixes シート）。読むだけで、縁泉シートには書かない。
+ * 規則は縁泉アプリ（ensen-home/js/ensen.js の latestSpotFixes / applySpotFixes）と同じ:
+ *   同じ actant_id では ts がいちばん新しい1行だけが効く（ts は文字列で比べ、同じ ts なら先の行）。
+ *   move で lat/lng があれば位置を置き換え、hide なら返さない、ok / undo は events の座標のまま。
+ * 返すのは { actant_id: { status, lat, lng } }。シートがなければ空。
+ */
+const SPOT_STATUS = ['move', 'hide', 'ok', 'undo'];
+const ENSEN_TIMEZONE = 'Asia/Tokyo';
+
+function latestSpotFixes_(book) {
+  const sheet = book.getSheetByName('spot_fixes');
+  if (!sheet || sheet.getLastRow() < 2) return {};
+  const values = sheet.getDataRange().getValues();
+  const header = values[0].map(String);
+  const col = {};
+  ['ts', 'actant_id', 'lat', 'lng', 'status'].forEach((c) => (col[c] = header.indexOf(c)));
+  if (col.actant_id < 0 || col.status < 0) return {};
+  const latest = {};
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const aid = String(row[col.actant_id] == null ? '' : row[col.actant_id]);
+    const status = String(row[col.status] == null ? '' : row[col.status]);
+    if (!aid || SPOT_STATUS.indexOf(status) < 0) continue;
+    const fix = { ts: isoString_(col.ts >= 0 ? row[col.ts] : ''), status: status, lat: num_(row[col.lat]), lng: num_(row[col.lng]) };
+    const cur = latest[aid];
+    if (!cur || fix.ts > cur.ts) latest[aid] = fix;
+  }
+  Object.keys(latest).forEach((aid) => {
+    const f = latest[aid];
+    // undo は消す。lat/lng のない move は何もしない（縁泉アプリと同じ）
+    if (f.status === 'undo' || (f.status === 'move' && (f.lat === null || f.lng === null))) delete latest[aid];
+  });
+  return latest;
+}
+
+// 縁泉ハブ（ensen-home/hub/Code.gs の isoString_）と同じ形の文字列にして、ts を文字列で比べられるようにする
+function isoString_(v) {
+  return v instanceof Date ? Utilities.formatDate(v, ENSEN_TIMEZONE, "yyyy-MM-dd'T'HH:mm:ssXXX") : String(v == null ? '' : v);
+}
+
+function num_(v) {
+  return v === '' || v == null || isNaN(Number(v)) ? null : Number(v);
 }
 
 // 資料の登録と削除。本文は JSON: { token, action: 'addLink', link: {...} } または { token, action: 'deleteLink', link_id }
