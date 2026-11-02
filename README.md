@@ -19,7 +19,7 @@
 - 地帯の町ごとに、公式サイト（Wikidata）・観光パンフレットの検索・Wikipedia へのリンクを出す。社や館は地図に登録された公式サイトも出す
 - 町・社・館に、パンフレットや Google ドライブに保存した資料のリンクを「＋資料」で登録できる。縁泉スプレッドシートの links シートに保存し（[gas/ensen-api.gs](gas/ensen-api.gs)）、行程にも出す
 - 地図の印は種類ごとのアイコン（⛩️🏛️🎨🏯ℹ️♨️）。配色は日本の伝統色
-- 「縁泉の最新の記録を読む」で、縁泉に追加した記録をすぐ反映（ふだんは1時間ごとに読み直す）
+- 「縁泉の最新の記録を読む」で、縁泉に追加した記録をすぐ反映（ふだんは1時間ごとに読み直す）。縁泉アプリで直したスポットの位置（spot_fixes）も重ねて読むので、位置を動かした場所は新しい位置の町で数え、「位置不明」にした場所は出さない
 
 ## 縁泉スプレッドシートとのつなぎ方
 
@@ -27,6 +27,20 @@
 
 1. [gas/ensen-api.gs](gas/ensen-api.gs) の冒頭の手順で Apps Script をウェブアプリとしてデプロイする
 2. 表示された URL と合言葉を `ENSEN_GAS_URL` / `ENSEN_GAS_TOKEN` に設定する（[.env.example](.env.example)）
+
+[gas/ensen-api.gs](gas/ensen-api.gs) を差し替えたときは、Apps Script のエディタに新しい中身を貼って保存し、「デプロイ → デプロイを管理 → ✏️（編集）→ バージョン: 新バージョン → デプロイ」で更新する。URL は変わらないので、Vercel の設定はそのままでよい。
+
+### 他アプリとの約束
+
+旅先と縁泉の関係は「計画するときに、行ったことがあるかを縁泉で見る」だけにとどめる。旅先から縁泉へ書き戻すのは資料の links シートだけで、それ以上の連携は増やさない。
+
+旅先の Apps Script が読む縁泉シートの列（ここを変えるときは旅先にも響く）:
+
+- `events`: `event_id, ts, lat, lng, actant_type, actant_name, actant_id, note, tags`（見出しの名前で引く。`actant_type` が「場所」の行だけ使う）
+- `spot_fixes`: `ts, actant_id, lat, lng, status`。縁泉アプリ（ensen-home）でスポットの位置を直すと追記される。旅先は events を返す前にこれを重ねる。規則は縁泉アプリの `latestSpotFixes` / `applySpotFixes`（ensen-home/js/ensen.js）と同じで、同じ `actant_id` では `ts` がいちばん新しい1行だけが効き、`move` は位置を置き換え、`hide` は返さず（位置不明）、`ok` / `undo` は events の座標のまま。シートがなければ何もしない。読むだけで書かない
+- `links`: 旅先が書く。列は [gas/ensen-api.gs](gas/ensen-api.gs) の冒頭
+
+縁泉アプリが規則を変えたら、`gas/ensen-api.gs` の `latestSpotFixes_` と、その確かめ（`src/lib/atlas/ensenApi.test.ts`）も合わせて直す。
 
 ## 開発
 
