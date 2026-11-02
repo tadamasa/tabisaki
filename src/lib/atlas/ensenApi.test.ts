@@ -123,3 +123,19 @@ test("events に actant_id 列がない古いシートでも動く", () => {
   const events = doGet({ events: [header, ...rows], spot_fixes: [FIX_HEADER, fix("2026-11-03T09:00:00+09:00", "a1", "hide")] });
   assert.equal(events.length, 5);
 });
+
+test("同じ秒の ts なら後に追記された行が勝つ", () => {
+  const events = doGet({
+    events: EVENTS,
+    spot_fixes: [
+      FIX_HEADER,
+      fix("2026-11-04T09:00:00+09:00", "a1", "move", 35, 136),
+      fix("2026-11-04T09:00:00+09:00", "a1", "move", 36, 137), // 後の行
+      fix("2026-11-04T09:00:00+09:00", "a2", "move", 35, 136),
+      fix("2026-11-04T09:00:00+09:00", "a2", "undo"), // 後の行で取り消し
+    ],
+  });
+  const byId = Object.fromEntries(events.map((e) => [e.event_id, [e.lat, e.lng]]));
+  assert.deepEqual(byId.e1, ["36", "137"]);
+  assert.deepEqual(byId.e3, ["34.2", "135.2"]);
+});
