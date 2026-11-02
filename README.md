@@ -37,7 +37,7 @@
 旅先の Apps Script が読む縁泉シートの列（ここを変えるときは旅先にも響く）:
 
 - `events`: `event_id, ts, lat, lng, actant_type, actant_name, actant_id, note, tags`（見出しの名前で引く。`actant_type` が「場所」の行だけ使う）
-- `spot_fixes`: `ts, actant_id, lat, lng, status`。縁泉アプリ（ensen-home）でスポットの位置を直すと追記される。旅先は events を返す前にこれを重ねる。規則は縁泉アプリの `latestSpotFixes` / `applySpotFixes`（ensen-home/js/ensen.js）と同じで、同じ `actant_id` では `ts` がいちばん新しい1行だけが効き、`move` は位置を置き換え、`hide` は返さず（位置不明）、`ok` / `undo` は events の座標のまま。シートがなければ何もしない。読むだけで書かない
+- `spot_fixes`: `ts, actant_id, lat, lng, status`。縁泉アプリ（ensen-home）でスポットの位置を直すと追記される。旅先は events を返す前にこれを重ねる。規則は縁泉アプリの `latestSpotFixes` / `applySpotFixes`（ensen-home/js/ensen.js）と同じで、同じ `actant_id` では `ts` がいちばん新しい1行だけが効き（同じ秒なら後に追記された行）、`move` は位置を置き換え、`hide` は返さず（位置不明）、`ok` / `undo` は events の座標のまま。シートがなければ何もしない。読むだけで書かない。`ts` は縁泉ハブが `yyyy-MM-dd'T'HH:mm:ss+09:00`（東京時間・秒まで）にそろえて書く約束なので、旅先は文字列のまま比べる（ensen-home/hub/README.md の「spot_fixes を読む相手（旅先）との約束」）
 - `links`: 旅先が書く。列は [gas/ensen-api.gs](gas/ensen-api.gs) の冒頭
 
 縁泉アプリが規則を変えたら、`gas/ensen-api.gs` の `latestSpotFixes_` と、その確かめ（`src/lib/atlas/ensenApi.test.ts`）も合わせて直す。

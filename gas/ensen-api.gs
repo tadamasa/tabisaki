@@ -60,7 +60,8 @@ function doGet(e) {
 /*
  * 縁泉アプリで直したスポットの位置（spot_fixes シート）。読むだけで、縁泉シートには書かない。
  * 規則は縁泉アプリ（ensen-home/js/ensen.js の latestSpotFixes / applySpotFixes）と同じ:
- *   同じ actant_id では ts がいちばん新しい1行だけが効く（ts は文字列で比べ、同じ ts なら先の行）。
+ *   同じ actant_id では ts がいちばん新しい1行だけが効く（ts は文字列で比べ、同じ ts なら後に追記された行）。
+ *   ts の書式は縁泉ハブが yyyy-MM-dd'T'HH:mm:ss+09:00 にそろえて書く約束（ensen-home/hub/README.md）。
  *   move で lat/lng があれば位置を置き換え、hide なら返さない、ok / undo は events の座標のまま。
  * 返すのは { actant_id: { status, lat, lng } }。シートがなければ空。
  */
@@ -83,7 +84,7 @@ function latestSpotFixes_(book) {
     if (!aid || SPOT_STATUS.indexOf(status) < 0) continue;
     const fix = { ts: isoString_(col.ts >= 0 ? row[col.ts] : ''), status: status, lat: num_(row[col.lat]), lng: num_(row[col.lng]) };
     const cur = latest[aid];
-    if (!cur || fix.ts > cur.ts) latest[aid] = fix;
+    if (!cur || fix.ts >= cur.ts) latest[aid] = fix;
   }
   Object.keys(latest).forEach((aid) => {
     const f = latest[aid];
