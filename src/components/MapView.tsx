@@ -298,7 +298,7 @@ export default function MapView({ atlas, areaIds, origin, selected, nearCircle, 
           features: atlas.spots.map((s) => ({
             type: "Feature",
             geometry: { type: "Point", coordinates: [s.lng, s.lat] },
-            properties: { name: s.name, ts: s.ts, cat: s.cat, note: s.note ?? "" },
+            properties: { name: s.name, ts: s.ts, first: s.first ?? s.ts, visits: s.visits ?? 1, cat: s.cat, note: s.note ?? "" },
           })),
         },
       });
@@ -362,11 +362,13 @@ export default function MapView({ atlas, areaIds, origin, selected, nearCircle, 
       if ((e.originalEvent.target as HTMLElement).closest(".maplibregl-marker")) return;
       const f = e.features?.[0] as MapGeoJSONFeature | undefined;
       if (!f) return;
-      const p = f.properties as { name: string; ts: string; cat: Spot["cat"]; note: string };
+      const p = f.properties as { name: string; ts: string; first: string; visits: number; cat: Spot["cat"]; note: string };
+      const when =
+        Number(p.visits) > 1 ? `${p.visits} 回 ・ ${formatDate(p.first)}〜${formatDate(p.ts)}` : formatDate(p.ts);
       new maplibregl.Popup()
         .setLngLat(e.lngLat)
         .setHTML(
-          `<strong>${escapeHtml(p.name)}</strong><br>${CATEGORY_LABEL[p.cat]} ・ ${formatDate(p.ts)}` +
+          `<strong>${escapeHtml(p.name)}</strong><br>${CATEGORY_LABEL[p.cat]} ・ ${when}` +
             (p.note ? `<br><span style="color:#6b665c">${escapeHtml(p.note)}</span>` : "") +
             mapLinks(e.lngLat.lng, e.lngLat.lat, p.name),
         )

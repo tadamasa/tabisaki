@@ -19,6 +19,7 @@ function toVisits(events: RawEvent[]): VisitRow[] {
       lat,
       lng,
       name: String(e.actant_name ?? ""),
+      place: e.actant_id ? String(e.actant_id) : undefined,
       note: e.note ? String(e.note) : null,
     });
   }

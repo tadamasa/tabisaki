@@ -17,6 +17,8 @@ export type VisitRow = {
   lat: number;
   lng: number;
   name: string;
+  // 縁泉の actant_id。同じ場所への記録をまとめるのに使う
+  place?: string;
   note: string | null;
 };
 
@@ -59,6 +61,12 @@ function unitOf(p: BoundaryProps) {
   return { id: p.N03_007, name, short, pref: p.N03_001 };
 }
 
+function median(xs: number[]) {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
 const bbox4 = (fc: FeatureCollection) => turf.bbox(fc) as [number, number, number, number];
 
 export function buildAtlas(
@@ -99,19 +107,46 @@ export function buildAtlas(
     return null;
   };
 
-  const spots: Spot[] = [];
-  let unmatched = 0;
+  // 同じ場所（actant）への記録は、地図では1点にまとめる。Swarm の記録はチェックインした端末の位置なので
+  // 記録ごとに少しずつずれている。位置は記録の緯度・経度それぞれの中央値（外れた記録に引きずられない）。
+  // 町の訪問も、記録ごとの位置ではなく、まとめた位置の町で数える
+  const groups = new Map<string, VisitRow[]>();
   for (const v of visits) {
     if (/テスト|ZZTEST/.test(v.name)) continue;
-    const u = findUnit(v.lng, v.lat);
+    const key = v.place ? `aid:${v.place}` : `pt:${v.name}@${v.lat},${v.lng}`;
+    const g = groups.get(key);
+    if (g) g.push(v);
+    else groups.set(key, [v]);
+  }
+
+  const spots: Spot[] = [];
+  let unmatched = 0;
+  for (const g of groups.values()) {
+    const lat = median(g.map((v) => v.lat));
+    const lng = median(g.map((v) => v.lng));
+    const sorted = [...g].sort((a, b) => a.ts.localeCompare(b.ts));
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const u = findUnit(lng, lat);
     if (u) {
-      u.visits++;
-      if (!u.first || v.ts < u.first) u.first = v.ts;
-      if (!u.last || v.ts > u.last) u.last = v.ts;
+      u.visits += g.length;
+      if (!u.first || first.ts < u.first) u.first = first.ts;
+      if (!u.last || last.ts > u.last) u.last = last.ts;
     } else {
-      unmatched++;
+      unmatched += g.length;
     }
-    spots.push({ name: v.name, lat: v.lat, lng: v.lng, ts: v.ts, cat: categoryOf(v.name), muni: u?.id ?? null, note: v.note });
+    const note = [...sorted].reverse().find((v) => v.note)?.note ?? null;
+    spots.push({
+      name: last.name,
+      lat,
+      lng,
+      ts: last.ts,
+      cat: categoryOf(last.name),
+      muni: u?.id ?? null,
+      note,
+      visits: g.length,
+      first: first.ts,
+    });
   }
 
   const areas = groupBlankAreas(unitList.filter((u) => u.visits === 0), edges);
