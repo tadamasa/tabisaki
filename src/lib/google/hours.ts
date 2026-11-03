@@ -19,15 +19,20 @@ export function dayHours(periods: Period[] | undefined, weekday: number): DayHou
   if (!periods?.length) return { kind: "unknown" };
   // 24時間営業は「日曜0時に開き、閉まらない」1つの期間で表される
   if (periods.length === 1 && !periods[0].close && min(periods[0].open) === 0) return { kind: "always" };
-  const ranges = periods
-    .filter((p) => p.open.day === weekday)
-    .map((p) => {
-      const start = min(p.open);
-      if (!p.close) return { start, end: 24 * 60 };
-      const days = (p.close.day - p.open.day + 7) % 7;
-      return { start, end: min(p.close) + days * 24 * 60 };
-    })
-    .sort((a, b) => a.start - b.start);
+  const span = (p: Period): Range => {
+    const start = min(p.open);
+    if (!p.close) return { start, end: 24 * 60 };
+    const days = (p.close.day - p.open.day + 7) % 7;
+    return { start, end: min(p.close) + days * 24 * 60 };
+  };
+  // 前の日の夜に開いて、この日の朝まで続く分も、この日の 0時からの範囲として入れる
+  const prev = (weekday + 6) % 7;
+  const carried = periods
+    .filter((p) => p.open.day === prev)
+    .map(span)
+    .filter((r) => r.end > 24 * 60)
+    .map((r) => ({ start: 0, end: r.end - 24 * 60 }));
+  const ranges = [...carried, ...periods.filter((p) => p.open.day === weekday).map(span)].sort((a, b) => a.start - b.start);
   return ranges.length ? { kind: "open", ranges } : { kind: "closed" };
 }
 

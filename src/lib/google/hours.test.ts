@@ -16,6 +16,9 @@ test("日をまたぐ営業は閉まる時刻に24時間を足す", () => {
   const bar: Period[] = [{ open: { day: 5, hour: 18, minute: 0 }, close: { day: 6, hour: 2, minute: 0 } }];
   assert.deepEqual(dayHours(bar, 5), { kind: "open", ranges: [{ start: 18 * 60, end: 26 * 60 }] });
   assert.equal(hoursText(dayHours(bar, 5)), "18:00–26:00");
+  // 翌日（土曜）の 1時は、金曜の夜からの続きで開いている
+  assert.deepEqual(dayHours(bar, 6), { kind: "open", ranges: [{ start: 0, end: 2 * 60 }] });
+  assert.equal(visitWarning(dayHours(bar, 6), 60, 90), null);
 });
 
 test("行程の時刻が営業時間に収まらないと知らせる", () => {
