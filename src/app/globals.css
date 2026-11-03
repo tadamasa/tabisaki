@@ -115,3 +115,16 @@ body {
     transition: none;
   }
 }
+
+/* 印刷・PDF では、画面の地図と一覧を隠し、行程表（PrintSheet）だけを紙の幅で出す */
+@media print {
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  @page {
+    margin: 12mm;
+  }
+}

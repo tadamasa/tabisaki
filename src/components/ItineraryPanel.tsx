@@ -77,9 +77,11 @@ type Props = {
   // 車・歩きの区間を実際の道で測る。困ったことがあれば文で返す
   onMeasure: () => Promise<string | null>;
   measured: boolean;
+  // 保存・印刷のボタン
+  saveSlot?: React.ReactNode;
 };
 
-// 地点のあいだの移動。地点どうしのあいだでは、2か所をつなぐボタンも出す。電車の区間には乗換案内を添える
+// 地点のあいだの移動。地点どうしのあいだでは、2か所をつなぐボタンも出す。電車の区間には Google マップの電車の経路を添える
 function Drive({ min, by, back = 0, transit, link }: { min: number; by: LegMode; back?: number; transit?: string; link?: { on: boolean; toggle: () => void } }) {
   return (
     <li className="flex flex-wrap items-center gap-x-2 py-0.5 pl-6 text-[11px] text-muted">
@@ -89,7 +91,7 @@ function Drive({ min, by, back = 0, transit, link }: { min: number; by: LegMode;
       </span>
       {transit && (
         <a href={transit} target="_blank" rel="noreferrer" className="text-museum underline">
-          乗換を調べる
+          Googleマップで電車の経路
         </a>
       )}
       {link && (
@@ -159,7 +161,7 @@ function OrderRules({
   );
 }
 
-export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripDate, trip, onDate, onChange, onStart, onStart2, onReset, onOptimize, onFocus, onAddHub, onMeasure, measured }: Props) {
+export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripDate, trip, onDate, onChange, onStart, onStart2, onReset, onOptimize, onFocus, onAddHub, onMeasure, measured, saveSlot }: Props) {
   const stops: Stop[] = plan.stops.map(({ place, role, linkNext, before }) => ({ place, role, linkNext, before }));
   const nameOf = new Map(stops.map((s, i) => [s.place.id, { name: s.place.name, at: i }]));
   // つないだ地点はかたまりごと動かす
@@ -191,8 +193,8 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
     return () => clearTimeout(t);
   }, [notice]);
   const optimize = () => setNotice(onOptimize() ? "移動がいちばん短くなる順に並べ直しました" : "すでに移動がいちばん短い順です");
-  // 電車は経由地を渡せないので、区間ごとに乗換案内を開く
-  const routes = mode === "train" ? [] : googleMapsRoutes(stops, home, mode);
+  // 電車は経由地を渡せないので、区間ごとに Google マップの電車の経路を開く
+  const routes = mode === "train" ? [] : googleMapsRoutes(plan.stops, home, mode);
   const transitLink = (i: number) => {
     const last = plan.dropOff?.place ?? stops[stops.length - 1]?.place;
     const from = i < stops.length ? plan.stops[i].from : last ? ([last.lng, last.lat] as [number, number]) : home;
@@ -238,6 +240,8 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
           </button>
         </span>
       </div>
+
+      {stops.length > 0 && saveSlot}
 
       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted">
         <label className="flex items-center gap-1">
@@ -398,8 +402,8 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
           )}
           <span className="text-muted">
             {measured ? "車と歩きの区間は Google の実際の道（渋滞は考えない）、ほかは直線距離からの目安です。" : "時刻は直線距離からの目安です。"}
-            {byCar && google && "「🅿️ 近くに停めて歩く」で駐車場を入れると、そこから「🔗 つないだ」地点は歩いて回り、つながりが切れたところで車に戻ります。"}
-            {mode === "train" && "電車は乗り換えや本数を考えていません（近い地点のあいだは歩きとみます）。各区間の「乗換を調べる」で確かめてください。"}
+            {byCar && google && "「🅿️ 近くに停めて歩く」で駐車場を入れると、車に戻るまでの歩きが合計5km以内の地点は歩いて回り、それより先は車に戻って進みます。"}
+            {mode === "train" && "電車は乗り換えや本数を考えていません（近い地点のあいだは歩きとみます）。各区間の「Googleマップで電車の経路」で時刻と乗り換えを確かめてください。"}
             地点のあいだの「🔗 つなぐ」を押すと、その2か所は並べ直しても続けてこの順に回ります。「＋より前に回る」では、あいだに別の場所が入ってもよい前後だけを決められます。
           </span>
         </p>

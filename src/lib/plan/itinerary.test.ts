@@ -253,12 +253,13 @@ test("電車＋レンタカー: 借りる所まで電車、あとは車で回り
   assert.equal(schedule([{ place: rental, role: "rent" }, { place: main, role: "anchor" }], home, 8 * 60, undefined, "car").stops.length, 1);
 });
 
-test("駐車場からつないだ地点は歩いて回り、つながりが切れたら車に戻る", () => {
+test("駐車場から、車に戻るまでの歩きが合計5kmに収まる地点は自動で歩く", () => {
   const lot = place("駐車場", "parking", 135.865, 34.375);
+  // 本命・近い社は駐車場から1km台、同系統の社は3km余り（往復で5kmを超える）
   const p = schedule(
     [
       { place: lot, role: "park", linkNext: true },
-      { place: main, role: "anchor", linkNext: true },
+      { place: main, role: "anchor" },
       { place: kinNear, role: "kin" },
       { place: kinSame, role: "kin" },
     ],
@@ -270,10 +271,13 @@ test("駐車場からつないだ地点は歩いて回り、つながりが切�
   assert.equal(p.stops[3].backMin, back);
   assert.deepEqual(p.stops[3].from, [lot.lng, lot.lat]);
   // 最後まで歩いて回ったら、帰りの前に車に戻る
-  const q = schedule([{ place: lot, role: "park", linkNext: true }, { place: main, role: "anchor" }], home);
+  const q = schedule([{ place: lot, role: "park" }, { place: main, role: "anchor" }], home);
+  assert.equal(q.stops[1].by, "walk");
   assert.equal(q.returnBackMin, travel([main.lng, main.lat], [lot.lng, lot.lat], "walk").min);
+  // 電車で回るときは駐車場があっても歩きにしない
+  assert.equal(schedule([{ place: lot, role: "park" }, { place: main, role: "anchor" }], home, 480, undefined, "train").returnBackMin, 0);
   // Google マップの車の経路には、歩いて回る地点を入れない
-  const url = new URL(googleMapsRoutes([{ place: lot, role: "park", linkNext: true }, { place: main, role: "anchor" }, { place: kinSame, role: "kin" }], home)[0].url);
+  const url = new URL(googleMapsRoutes(p.stops, home)[0].url);
   assert.equal(url.searchParams.get("waypoints")!.split("|").length, 2);
 });
 

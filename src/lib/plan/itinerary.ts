@@ -5,7 +5,7 @@ import type { AreaPlaces, Place } from "@/lib/types";
 
 // stay: 泊まる宿。宿に着いたら1日目が終わり、翌朝そこから2日目を始める
 // rent: 電車で来てレンタカーを借りる所。いつも行程の最初に回り、最後にここへ車を返して電車で帰る
-// park: 車を停める駐車場。ここから「つないだ」地点は歩いて回り、つながりが切れたら歩いて車に戻る
+// park: 車を停める駐車場。ここから、車に戻るまでの歩きが合計 5km に収まる地点は歩いて回り、収まらなくなったら歩いて車に戻る
 export type Role = "primer" | "anchor" | "kin" | "extra" | "stay" | "rent" | "park";
 // linkNext: すぐ次の地点とつなぐ。つないだ2か所は、並べ直しても続けてこの順に回る
 // before: この地点より後に回る地点の id。あいだに別の地点が入ってもよい
@@ -94,6 +94,10 @@ export function driveMinutes(from: [number, number], to: [number, number]) {
 
 const at = (p: Place): [number, number] => [p.lng, p.lat];
 
+// 駐車場に停めたら、車に戻るまでの歩きがこの道のり（km）に収まる地点は歩いて回る
+export const PARK_WALK_KM = 5;
+const walkKm = (a: [number, number], b: [number, number]) => kmBetween(a, b) * 1.25;
+
 // 歩き・自転車は道のりを直線の1.25倍とみる
 const WALK_KMH = 4;
 const BIKE_KMH = 14;
@@ -118,7 +122,7 @@ export function travel(from: [number, number], to: [number, number], mode: LegMo
 // 行程の区間を順に数える。
 // 電車＋レンタカー（rent）では、借りる所（role: rent）までを電車で行き、そこから車で回り、最後に同じ所へ車を返して電車で帰る。
 // 借りる所が決まっていなければ電車として数える。
-// 駐車場（role: park）からつないだ地点は歩いて回り、つながりが切れたところで歩いて車に戻ってから次へ進む
+// 駐車場（role: park）に停めたら、車に戻るまでの歩きが合計 5km に収まる地点は歩いて回り、収まらなくなったら歩いて車に戻ってから次へ進む
 export function schedule(
   stops: Stop[],
   home: [number, number],
@@ -140,7 +144,8 @@ export function schedule(
   let lateMin = 0;
   let earlyMin = 0;
   let parked: [number, number] | null = null;
-  let walking = false;
+  // 駐車場から歩いた道のり（km、直線の1.25倍）
+  let walkedKm = 0;
   const legList: Plan["legs"] = [];
   const go = (a: [number, number], b: [number, number], m: LegMode) => {
     legList.push({ by: m, from: a, to: b });
@@ -148,14 +153,17 @@ export function schedule(
   };
   const timed: TimedStop[] = ordered.map((s) => {
     let backMin = 0;
-    // つながりが切れたら、まず歩いて車に戻る
-    if (parked && !walking) {
+    // 駐車場から、ここへ寄って車に戻るまでの歩きが合計 PARK_WALK_KM に収まれば歩く。収まらなければ、まず歩いて車に戻る
+    const walkable =
+      !!parked && s.role !== "stay" && s.role !== "park" && walkedKm + walkKm(here, at(s.place)) + walkKm(at(s.place), parked) <= PARK_WALK_KM;
+    if (parked && !walkable) {
       backMin = go(here, parked, "walk").min;
       here = parked;
       parked = null;
     }
     const from = here;
-    const legMode: LegMode = s === rent ? "train" : parked && walking ? "walk" : vehicle;
+    const legMode: LegMode = s === rent ? "train" : walkable ? "walk" : vehicle;
+    if (walkable) walkedKm += walkKm(here, at(s.place));
     const leg = go(here, at(s.place), legMode);
     const driveMin = leg.min + backMin;
     drive += driveMin;
@@ -163,8 +171,10 @@ export function schedule(
     const stayMin = stayOf(s);
     here = at(s.place);
     const thisDay = day;
-    if (s.role === "park" && canPark) parked = here;
-    walking = !!parked && !!s.linkNext;
+    if (s.role === "park" && canPark) {
+      parked = here;
+      walkedKm = 0;
+    }
     if (s.role === "stay") {
       lateMin += Math.max(0, arrive - INN_BY);
       earlyMin += Math.max(0, CHECK_IN - arrive);
@@ -172,7 +182,6 @@ export function schedule(
       t = start2;
       // 宿には車で着いているとみる
       parked = null;
-      walking = false;
     } else t = arrive + stayMin;
     return { ...s, driveMin, by: leg.by, arrive, depart: t, stayMin, day: thisDay, backMin, from };
   });
@@ -359,16 +368,12 @@ export function googleMapsLeg(from: [number, number], to: [number, number], mode
   return `https://www.google.com/maps/dir/?${new URLSearchParams({ api: "1", origin: ll(from), destination: ll(to), travelmode: TRAVELMODE[mode] })}`;
 }
 
-export function googleMapsRoutes(stops: Stop[], home: [number, number], mode: Mode = "car") {
+export function googleMapsRoutes(stops: (Stop & { by?: LegMode })[], home: [number, number], mode: Mode = "car") {
   // 電車＋レンタカーでは、借りる所から借りる所までの車の経路にする
   const rent = mode === "rent" ? stops.find((s) => s.role === "rent") : undefined;
   const base = rent ? at(rent.place) : home;
-  // 駐車場から歩いて回る地点は、車の経路に入れない
-  const driven = stops.filter((s, i) => {
-    if (s.role === "rent") return false;
-    for (let k = i - 1; k >= 0 && stops[k].linkNext; k--) if (stops[k].role === "park") return false;
-    return true;
-  });
+  // 駐車場から歩いて回る地点（schedule が by: walk にした地点）は、車の経路に入れない
+  const driven = stops.filter((s) => s.role !== "rent" && !(s.role !== "stay" && s.by === "walk" && (mode === "car" || mode === "rent")));
   const legs: { from: [number, number]; to: [number, number]; via: Stop[] }[] = [];
   let from = base;
   let via: Stop[] = [];
