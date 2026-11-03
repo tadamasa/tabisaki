@@ -105,7 +105,7 @@ function bboxOf(g: import("geojson").Polygon | import("geojson").MultiPolygon) {
 
 const formatDate = (ts: string | null) => (ts ? ts.slice(0, 10).replaceAll("-", "/") : "—");
 
-const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: HUE.ai, anchor: HUE.shu, kin: "#e07a5f", extra: HUE.edomurasaki, stay: HUE.chitose };
+const ROUTE_COLOR: Record<TimedStop["role"], string> = { primer: HUE.ai, anchor: HUE.shu, kin: "#e07a5f", extra: HUE.edomurasaki, stay: HUE.chitose, rent: HUE.nibi, park: HUE.nibi };
 
 // 宿の空きを調べる検索（予約サイトを1つに決めない）
 export const innSearchLink = (p: Place) =>

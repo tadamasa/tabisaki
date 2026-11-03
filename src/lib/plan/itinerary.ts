@@ -4,22 +4,47 @@
 import type { AreaPlaces, Place } from "@/lib/types";
 
 // stay: 泊まる宿。宿に着いたら1日目が終わり、翌朝そこから2日目を始める
-export type Role = "primer" | "anchor" | "kin" | "extra" | "stay";
+// rent: 電車で来てレンタカーを借りる所。いつも行程の最初に回り、最後にここへ車を返して電車で帰る
+// park: 車を停める駐車場。ここから、車に戻るまでの歩きが合計 5km に収まる地点は歩いて回り、収まらなくなったら歩いて車に戻る
+export type Role = "primer" | "anchor" | "kin" | "extra" | "stay" | "rent" | "park";
 // linkNext: すぐ次の地点とつなぐ。つないだ2か所は、並べ直しても続けてこの順に回る
 // before: この地点より後に回る地点の id。あいだに別の地点が入ってもよい
 export type Stop = { place: Place; role: Role; linkNext?: boolean; before?: string[] };
-// 移動手段。電車は、近い地点のあいだを歩く
-export type Mode = "car" | "train" | "bike" | "walk";
-export const MODE_LABEL: Record<Mode, string> = { car: "車", train: "電車", bike: "自転車", walk: "徒歩" };
+// 移動手段。電車は、近い地点のあいだを歩く。rent は電車で行ってレンタカーを借りる（借りる所までが電車、あとは車）
+export type Mode = "car" | "train" | "bike" | "walk" | "rent";
+// 区間ごとの移動手段。rent は区間では電車か車になる
+export type LegMode = Exclude<Mode, "rent">;
+export const MODE_LABEL: Record<Mode, string> = { car: "車", train: "電車", bike: "自転車", walk: "徒歩", rent: "電車＋レンタカー" };
 // driveMin: ひとつ前の地点からの移動の分、by: その区間の移動手段。day: 何日目に着くか。宿の depart は翌朝の出発時刻
-export type TimedStop = Stop & { driveMin: number; by: Mode; arrive: number; depart: number; stayMin: number; day: number };
+// backMin: 駐車場から歩いて回ったあと、車に戻るまでの歩きの分（driveMin に含む）。from: その区間の出発点（車に戻ったあとの位置）
+export type TimedStop = Stop & {
+  driveMin: number;
+  by: LegMode;
+  arrive: number;
+  depart: number;
+  stayMin: number;
+  day: number;
+  backMin: number;
+  from: [number, number];
+};
+// 実際の道で測った区間の分（Google の経路）。leg キーで引く。なければ直線距離からの目安を使う
+export type LegTimes = Map<string, number>;
+const r4 = (v: number) => v.toFixed(4);
+export const legKey = (by: LegMode, [lng1, lat1]: [number, number], [lng2, lat2]: [number, number]) =>
+  `${by}:${r4(lat1)},${r4(lng1)}>${r4(lat2)},${r4(lng2)}`;
 // overMin: 宿に18時、自宅に19時を過ぎる分の合計。lateMin: そのうち宿に遅れる分。earlyMin: 宿に15時より早く着く分
 export type Plan = {
   start: number;
   start2: number;
   stops: TimedStop[];
   returnMin: number;
-  returnBy: Mode;
+  returnBy: LegMode;
+  // 帰りに車に戻る歩きの分（returnMin に含む）
+  returnBackMin: number;
+  // レンタカーを返す所。最後の地点から車で戻り、手続きのあと電車で帰る
+  dropOff: { place: Place; driveMin: number; backMin: number; arrive: number; depart: number } | null;
+  // 数えた区間（実際の道で測り直すのに使う）
+  legs: { by: LegMode; from: [number, number]; to: [number, number] }[];
   home: number;
   days: number;
   driveMin: number;
@@ -29,13 +54,17 @@ export type Plan = {
 };
 
 // 滞在の目安（分）。博物館・美術館・城が本命のときは長めに見る
-export const STAY_MIN: Record<Role, number> = { primer: 60, anchor: 60, kin: 30, extra: 45, stay: 0 };
+export const STAY_MIN: Record<Role, number> = { primer: 60, anchor: 60, kin: 30, extra: 45, stay: 0, rent: 20, park: 5 };
+// レンタカーを返す手続き
+export const RETURN_MIN = 15;
 const HALL_ANCHOR_MIN = 90;
 export const stayOf = (s: Stop) => (s.role === "anchor" && s.place.kind !== "shrine" ? HALL_ANCHOR_MIN : STAY_MIN[s.role]);
 
 // 足した場所の役目。社はゆかり、本命が社なら資料館・案内所は予習、ほかは立ち寄り
 export function roleFor(p: Place, stops: Stop[]): Role {
   if (p.kind === "lodging") return "stay";
+  if (p.kind === "rental") return "rent";
+  if (p.kind === "parking") return "park";
   if (p.kind === "shrine") return "kin";
   const anchor = stops.find((s) => s.role === "anchor");
   if (p.kind === "info" || (p.kind === "museum" && anchor?.place.kind === "shrine")) return "primer";
@@ -65,13 +94,20 @@ export function driveMinutes(from: [number, number], to: [number, number]) {
 
 const at = (p: Place): [number, number] => [p.lng, p.lat];
 
+// 駐車場に停めたら、車に戻るまでの歩きがこの道のり（km）に収まる地点は歩いて回る
+export const PARK_WALK_KM = 5;
+const walkKm = (a: [number, number], b: [number, number]) => kmBetween(a, b) * 1.25;
+
 // 歩き・自転車は道のりを直線の1.25倍とみる
 const WALK_KMH = 4;
 const BIKE_KMH = 14;
 // 電車: 駅までの歩きと待ちに25分。近ければ各駅停車、遠ければ快速・特急（新幹線）の速さとみる。乗り換えや本数は考えない
 const TRAIN_OVERHEAD_MIN = 25;
 
-export function travel(from: [number, number], to: [number, number], mode: Mode = "car"): { min: number; by: Mode } {
+export function travel(from: [number, number], to: [number, number], mode: LegMode = "car", legs?: LegTimes): { min: number; by: LegMode } {
+  // 車・歩き・自転車は、実際の道で測った分があればそれを使う
+  const known = mode !== "train" ? legs?.get(legKey(mode, from, to)) : undefined;
+  if (known != null) return { min: known, by: mode };
   const km = kmBetween(from, to);
   const walk = Math.round(((km * 1.25) / WALK_KMH) * 60);
   if (mode === "walk") return { min: walk, by: "walk" };
@@ -83,36 +119,98 @@ export function travel(from: [number, number], to: [number, number], mode: Mode 
   return walk <= train ? { min: walk, by: "walk" } : { min: train, by: "train" };
 }
 
-export function schedule(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2, mode: Mode = "car"): Plan {
+// 行程の区間を順に数える。
+// 電車＋レンタカー（rent）では、借りる所（role: rent）までを電車で行き、そこから車で回り、最後に同じ所へ車を返して電車で帰る。
+// 借りる所が決まっていなければ電車として数える。
+// 駐車場（role: park）に停めたら、車に戻るまでの歩きが合計 5km に収まる地点は歩いて回り、収まらなくなったら歩いて車に戻ってから次へ進む
+export function schedule(
+  stops: Stop[],
+  home: [number, number],
+  start = 8 * 60,
+  start2 = DEFAULT_START2,
+  mode: Mode = "car",
+  legs?: LegTimes,
+): Plan {
+  const rent = mode === "rent" ? stops.find((s) => s.role === "rent") : undefined;
+  // 借りる所はいつも最初。rent でないときの借りる所は数えない
+  const ordered = rent ? [rent, ...stops.filter((s) => s !== rent)] : stops.filter((s) => s.role !== "rent");
+  const vehicle: LegMode = mode === "rent" ? (rent ? "car" : "train") : mode;
+  // 駐車場からは歩く（車で回るときだけ）
+  const canPark = vehicle === "car";
   let t = start;
   let here = home;
   let day = 1;
   let drive = 0;
   let lateMin = 0;
   let earlyMin = 0;
-  const timed: TimedStop[] = stops.map((s) => {
-    const { min: driveMin, by } = travel(here, at(s.place), mode);
+  let parked: [number, number] | null = null;
+  // 駐車場から歩いた道のり（km、直線の1.25倍）
+  let walkedKm = 0;
+  const legList: Plan["legs"] = [];
+  const go = (a: [number, number], b: [number, number], m: LegMode) => {
+    legList.push({ by: m, from: a, to: b });
+    return travel(a, b, m, legs);
+  };
+  const timed: TimedStop[] = ordered.map((s) => {
+    let backMin = 0;
+    // 駐車場から、ここへ寄って車に戻るまでの歩きが合計 PARK_WALK_KM に収まれば歩く。収まらなければ、まず歩いて車に戻る
+    const walkable =
+      !!parked && s.role !== "stay" && s.role !== "park" && walkedKm + walkKm(here, at(s.place)) + walkKm(at(s.place), parked) <= PARK_WALK_KM;
+    if (parked && !walkable) {
+      backMin = go(here, parked, "walk").min;
+      here = parked;
+      parked = null;
+    }
+    const from = here;
+    const legMode: LegMode = s === rent ? "train" : walkable ? "walk" : vehicle;
+    if (walkable) walkedKm += walkKm(here, at(s.place));
+    const leg = go(here, at(s.place), legMode);
+    const driveMin = leg.min + backMin;
     drive += driveMin;
     const arrive = t + driveMin;
     const stayMin = stayOf(s);
     here = at(s.place);
     const thisDay = day;
+    if (s.role === "park" && canPark) {
+      parked = here;
+      walkedKm = 0;
+    }
     if (s.role === "stay") {
       lateMin += Math.max(0, arrive - INN_BY);
       earlyMin += Math.max(0, CHECK_IN - arrive);
       day++;
       t = start2;
+      // 宿には車で着いているとみる
+      parked = null;
     } else t = arrive + stayMin;
-    return { ...s, driveMin, by, arrive, depart: t, stayMin, day: thisDay };
+    return { ...s, driveMin, by: leg.by, arrive, depart: t, stayMin, day: thisDay, backMin, from };
   });
-  const { min: returnMin, by: returnBy } = travel(here, home, mode);
+  let returnBackMin = 0;
+  if (parked) {
+    returnBackMin = go(here, parked, "walk").min;
+    here = parked;
+  }
+  let dropOff: Plan["dropOff"] = null;
+  if (rent) {
+    const back = go(here, at(rent.place), "car").min + returnBackMin;
+    drive += back;
+    dropOff = { place: rent.place, driveMin: back, backMin: returnBackMin, arrive: t + back, depart: t + back + RETURN_MIN };
+    t = dropOff.depart;
+    here = at(rent.place);
+    returnBackMin = 0;
+  }
+  const back = go(here, home, rent ? "train" : vehicle);
+  const returnMin = back.min + returnBackMin;
   const homeAt = t + returnMin;
   return {
     start,
     start2,
     stops: timed,
     returnMin,
-    returnBy,
+    returnBy: back.by,
+    returnBackMin,
+    dropOff,
+    legs: legList,
     home: homeAt,
     days: day,
     driveMin: drive + returnMin,
@@ -220,12 +318,14 @@ function* permutations<T>(xs: T[]): Generator<T[]> {
   }
 }
 
-export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2, mode: Mode = "car"): Stop[] {
-  const blocks = blocksOf(stops);
-  if (blocks.length <= 1) return blocks.flat();
+export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 * 60, start2 = DEFAULT_START2, mode: Mode = "car", legs?: LegTimes): Stop[] {
+  // レンタカーを借りる所は並べ直さず、いつも先頭に置く
+  const rent = stops.filter((s) => s.role === "rent");
+  const blocks = blocksOf(stops.filter((s) => s.role !== "rent"));
+  if (blocks.length <= 1) return [...rent, ...blocks.flat()];
   const cost = (order: Stop[][]) => {
     const o = order.flat();
-    return primerFirst(o) && keepsOrder(o) ? costOf(schedule(o, home, start, start2, mode)) : Infinity;
+    return primerFirst(o) && keepsOrder(o) ? costOf(schedule([...rent, ...o], home, start, start2, mode, legs)) : Infinity;
   };
   // 今の順で同点なら動かさない
   let best = blocks;
@@ -235,7 +335,7 @@ export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 *
       const c = cost(o);
       if (c < bestCost) [best, bestCost] = [o, c];
     }
-    return best.flat();
+    return [...rent, ...best.flat()];
   }
   if (bestCost === Infinity) {
     const hasPrimer = (b: Stop[]) => b.some((s) => s.role === "primer");
@@ -252,7 +352,7 @@ export function optimizeOrder(stops: Stop[], home: [number, number], start = 8 *
       }
     }
   }
-  return best.flat();
+  return [...rent, ...best.flat()];
 }
 
 export const clock = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
@@ -261,18 +361,23 @@ export const clock = (min: number) => `${Math.floor(min / 60)}:${String(min % 60
 // スマホのブラウザでは3か所までしか通らないことがある）。
 // 電車では経由地が使えないので、区間ごとに乗換案内を開く
 export const MAPS_WAYPOINT_MAX = 9;
-const TRAVELMODE: Record<Mode, string> = { car: "driving", train: "transit", bike: "bicycling", walk: "walking" };
+const TRAVELMODE: Record<Mode, string> = { car: "driving", train: "transit", bike: "bicycling", walk: "walking", rent: "driving" };
 const ll = ([lng, lat]: [number, number]) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
 
 export function googleMapsLeg(from: [number, number], to: [number, number], mode: Mode) {
   return `https://www.google.com/maps/dir/?${new URLSearchParams({ api: "1", origin: ll(from), destination: ll(to), travelmode: TRAVELMODE[mode] })}`;
 }
 
-export function googleMapsRoutes(stops: Stop[], home: [number, number], mode: Mode = "car") {
+export function googleMapsRoutes(stops: (Stop & { by?: LegMode })[], home: [number, number], mode: Mode = "car") {
+  // 電車＋レンタカーでは、借りる所から借りる所までの車の経路にする
+  const rent = mode === "rent" ? stops.find((s) => s.role === "rent") : undefined;
+  const base = rent ? at(rent.place) : home;
+  // 駐車場から歩いて回る地点（schedule が by: walk にした地点）は、車の経路に入れない
+  const driven = stops.filter((s) => s.role !== "rent" && !(s.role !== "stay" && s.by === "walk" && (mode === "car" || mode === "rent")));
   const legs: { from: [number, number]; to: [number, number]; via: Stop[] }[] = [];
-  let from = home;
+  let from = base;
   let via: Stop[] = [];
-  for (const s of stops) {
+  for (const s of driven) {
     if (s.role !== "stay") {
       via.push(s);
       continue;
@@ -281,7 +386,7 @@ export function googleMapsRoutes(stops: Stop[], home: [number, number], mode: Mo
     from = at(s.place);
     via = [];
   }
-  legs.push({ from, to: home, via });
+  legs.push({ from, to: base, via });
   return legs.map((leg, i) => ({
     day: i + 1,
     dropped: Math.max(0, leg.via.length - MAPS_WAYPOINT_MAX),

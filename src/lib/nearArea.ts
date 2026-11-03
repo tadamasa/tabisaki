@@ -5,7 +5,7 @@ import type { Atlas, BlankArea } from "@/lib/types";
 export const NEAR_AREA_PREFIX = "near:";
 
 // 半径の既定。歩き・自転車は狭く、車や電車は日帰りで寄り道できる程度
-export const NEAR_KM = { walk: 2.5, bike: 8, train: 12, car: 20 } as const;
+export const NEAR_KM = { walk: 2.5, bike: 8, train: 12, car: 20, rent: 12 } as const;
 
 // 同じあたりで何度も問い合わせないよう、位置は約1km（小数2桁）に丸める
 export const nearAreaId = ([lng, lat]: [number, number], km: number) => `${NEAR_AREA_PREFIX}${lat.toFixed(2)},${lng.toFixed(2)},${km}`;

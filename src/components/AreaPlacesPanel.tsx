@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { KIND } from "@/lib/kinds";
 import { NEAR_AREA_PREFIX } from "@/lib/nearArea";
 import { festivalNote } from "@/lib/places/festival";
 import { nearPicks } from "@/lib/plan/itinerary";
 import { TOWN_AREA_PREFIX } from "@/lib/townArea";
 import AreaNews from "./AreaNews";
+import { GoogleInfo, GooglePanel, GoogleToggle } from "./GoogleInfo";
 import { LinkChips, placeTarget } from "./Links";
 import type { AreaPlaces, En, Place, Visit } from "@/lib/types";
 
@@ -145,27 +147,32 @@ function PlanButtons({ place, planIds, anchorId, onToggle, onMakeAnchor }: PlanP
   );
 }
 
-function PlaceRow({ place, onFocus, ...plan }: PlanProps & { place: Place; onFocus: (p: Place) => void }) {
+function PlaceRow({ place, trip, onFocus, ...plan }: PlanProps & { place: Place; trip: Date; onFocus: (p: Place) => void }) {
+  const [google, setGoogle] = useState(false);
   return (
-    <li className="flex items-start justify-between gap-2 py-1.5">
-      <span className="min-w-0">
-        <span className="mr-1" aria-hidden>
-          {KIND[place.kind].icon}
+    <li className="py-1.5">
+      <div className="flex items-start justify-between gap-2">
+        <span className="min-w-0">
+          <span className="mr-1" aria-hidden>
+            {KIND[place.kind].icon}
+          </span>
+          <PlaceName place={place} />
+          <span className="ml-1.5 text-xs text-muted">
+            {KIND[place.kind].label} ・ {place.town}
+          </span>{" "}
+          <button type="button" onClick={() => onFocus(place)} className="text-xs text-museum underline">
+            地図
+          </button>
+          <SiteLink place={place} />
+          <GoogleToggle open={google} onOpen={() => setGoogle(true)} />
+          {place.reasons.length > 0 && (
+            <span className="ml-1.5 text-[11px] text-muted">{place.reasons.join("・")}</span>
+          )}
+          <LinkChips target={placeTarget(place)} />
         </span>
-        <PlaceName place={place} />
-        <span className="ml-1.5 text-xs text-muted">
-          {KIND[place.kind].label} ・ {place.town}
-        </span>{" "}
-        <button type="button" onClick={() => onFocus(place)} className="text-xs text-museum underline">
-          地図
-        </button>
-        <SiteLink place={place} />
-        {place.reasons.length > 0 && (
-          <span className="ml-1.5 text-[11px] text-muted">{place.reasons.join("・")}</span>
-        )}
-        <LinkChips target={placeTarget(place)} />
-      </span>
-      <PlanButtons place={place} {...plan} />
+        <PlanButtons place={place} {...plan} />
+      </div>
+      {google && <GooglePanel place={place} trip={trip} onClose={() => setGoogle(false)} />}
     </li>
   );
 }
@@ -285,6 +292,7 @@ export default function AreaPlacesPanel({ state, trip, home, onNearPlan, onRetry
                   </ul>
                 )}
                 <RankNote place={a} />
+                <GoogleInfo place={a} trip={trip} />
                 {a.en && <EnNote en={a.en} />}
                 {a.primer && (
                   <p className="mt-1.5 text-xs text-muted">
@@ -309,7 +317,7 @@ export default function AreaPlacesPanel({ state, trip, home, onNearPlan, onRetry
         ) : (
           <ul className="mt-1 divide-y divide-border text-sm">
             {halls.map((p) => (
-              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+              <PlaceRow key={p.id} place={p} trip={trip} onFocus={onFocus} {...plan} />
             ))}
           </ul>
         )}
@@ -320,7 +328,7 @@ export default function AreaPlacesPanel({ state, trip, home, onNearPlan, onRetry
           <h3 className="text-xs font-semibold tracking-wide text-muted">🏯 城・城跡</h3>
           <ul className="mt-1 divide-y divide-border text-sm">
             {castles.map((p) => (
-              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+              <PlaceRow key={p.id} place={p} trip={trip} onFocus={onFocus} {...plan} />
             ))}
           </ul>
         </section>
@@ -331,7 +339,7 @@ export default function AreaPlacesPanel({ state, trip, home, onNearPlan, onRetry
           <h3 className="text-xs font-semibold tracking-wide text-muted">ℹ️ 観光案内所</h3>
           <ul className="mt-1 divide-y divide-border text-sm">
             {infos.map((p) => (
-              <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+              <PlaceRow key={p.id} place={p} trip={trip} onFocus={onFocus} {...plan} />
             ))}
           </ul>
         </section>
@@ -345,7 +353,7 @@ export default function AreaPlacesPanel({ state, trip, home, onNearPlan, onRetry
             <p className="mt-1 text-[11px] text-muted">「ここに泊まる」で1泊2日の行程になります。泊まれるのは1か所で、選び直すと入れ替わります。</p>
             <ul className="mt-1 divide-y divide-border text-sm">
               {lodgings.map((p) => (
-                <PlaceRow key={p.id} place={p} onFocus={onFocus} {...plan} />
+                <PlaceRow key={p.id} place={p} trip={trip} onFocus={onFocus} {...plan} />
               ))}
             </ul>
           </>
@@ -353,7 +361,7 @@ export default function AreaPlacesPanel({ state, trip, home, onNearPlan, onRetry
       </section>
       <AreaNews areaId={state.areaId} />
       <p className="text-[11px] text-muted">
-        出典: {source}。例祭は Wikipedia の基礎情報から（旧暦の日付は数えていません）。社格などは名前と登録情報からの推定です。「行ったことのある町」は、地帯の隣で訪問済みの町にある、まだ記録のない場所です。
+        出典: {source}。例祭は Wikipedia の基礎情報から（旧暦の日付は数えていません）。社格などは名前と登録情報からの推定です。評価・営業時間・写真は Google マップから（押したときだけ読みます）。「行ったことのある町」は、地帯の隣で訪問済みの町にある、まだ記録のない場所です。
       </p>
     </div>
   );

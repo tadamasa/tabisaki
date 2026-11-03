@@ -9,6 +9,7 @@ const MODES: { mode: Mode; icon: string }[] = [
   { mode: "train", icon: "🚃" },
   { mode: "bike", icon: "🚲" },
   { mode: "walk", icon: "🚶" },
+  { mode: "rent", icon: "🚃🚙" },
 ];
 
 type Props = {

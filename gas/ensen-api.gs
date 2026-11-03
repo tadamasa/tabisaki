@@ -1,5 +1,5 @@
 /**
- * 縁泉スプレッドシートの「場所」の記録を（spot_fixes で直した位置を重ねて）tabisaki に渡し、tabisaki で登録した資料のリンクを「links」シートに読み書きする Web API。
+ * 縁泉スプレッドシートの「場所」の記録を（spot_fixes で直した位置を重ねて）tabisaki に渡し、tabisaki で登録した資料のリンクを「links」シートに、保存した行程を「plans」シートに読み書きする Web API。
  *
  * 使い方（縁泉本体とは別の Apps Script プロジェクトとして作る）
  * 1. https://script.google.com で新しいプロジェクトを作り、このファイルの中身を貼る
@@ -24,8 +24,19 @@
  *   title        資料の名前（例「吉野町観光パンフレット」）
  *   url          資料の URL（Google ドライブの共有リンクなど）
  *   note         メモ
+ *
+ * plans シート（はじめて行程を保存したときに作る）。tabisaki で組んだ行程を、あとで開いて直せるように置く
+ *   plan_id      一意の id
+ *   updated_at   保存した日時（ISO 8601）
+ *   title        行程の名前
+ *   area_id      地帯の id
+ *   area_label   地帯の名前
+ *   trip_date    旅の日（YYYY-MM-DD）
+ *   mode         移動手段（car / train / bike / walk / rent）
+ *   data         行程の中身（JSON。地点・順番・出発時刻・出発地）
  */
 const COLUMNS = ['event_id', 'ts', 'lat', 'lng', 'actant_type', 'actant_name', 'actant_id', 'note', 'tags'];
+const PLAN_COLUMNS = ['plan_id', 'updated_at', 'title', 'area_id', 'area_label', 'trip_date', 'mode', 'data'];
 const LINK_COLUMNS = ['link_id', 'created_at', 'target_type', 'target_id', 'target_name', 'muni_code', 'lat', 'lng', 'title', 'url', 'note'];
 
 function doGet(e) {
@@ -33,6 +44,7 @@ function doGet(e) {
   if (!authorized_(props, e && e.parameter && e.parameter.token)) return json_({ error: 'unauthorized' });
   const book = SpreadsheetApp.openById(props.getProperty('SHEET_ID'));
   if (e.parameter.action === 'links') return json_({ links: readLinks_(book) });
+  if (e.parameter.action === 'plans') return json_({ plans: readRows_(book, 'plans', PLAN_COLUMNS) });
 
   const sheet = book.getSheetByName('events');
   const values = sheet.getDataRange().getDisplayValues();
@@ -104,6 +116,7 @@ function num_(v) {
 }
 
 // 資料の登録と削除。本文は JSON: { token, action: 'addLink', link: {...} } または { token, action: 'deleteLink', link_id }
+// 行程の保存と削除: { token, action: 'savePlan', plan: {...} }（plan_id が同じ行があれば上書き）または { token, action: 'deletePlan', plan_id }
 function doPost(e) {
   const props = PropertiesService.getScriptProperties();
   let body;
@@ -117,6 +130,12 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    if (body.action === 'savePlan') return json_({ plan: savePlan_(book, body.plan || {}) });
+    if (body.action === 'deletePlan') {
+      const sheet = book.getSheetByName('plans');
+      if (sheet && deleteRowById_(sheet, body.plan_id)) return json_({ deleted: body.plan_id });
+      return json_({ error: 'not found' });
+    }
     const sheet = linkSheet_(book);
     if (body.action === 'addLink') {
       const link = body.link || {};
@@ -140,6 +159,51 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function savePlan_(book, plan) {
+  let sheet = book.getSheetByName('plans');
+  if (!sheet) {
+    sheet = book.insertSheet('plans');
+    sheet.appendRow(PLAN_COLUMNS);
+    sheet.setFrozenRows(1);
+  }
+  if (!plan.plan_id) plan.plan_id = Utilities.getUuid();
+  plan.updated_at = new Date().toISOString();
+  const row = PLAN_COLUMNS.map((c) => (plan[c] === undefined || plan[c] === null ? '' : String(plan[c])));
+  const ids = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
+  for (let r = 1; r < ids.length; r++) {
+    if (ids[r][0] === plan.plan_id) {
+      sheet.getRange(r + 1, 1, 1, row.length).setValues([row]);
+      return plan;
+    }
+  }
+  sheet.appendRow(row);
+  return plan;
+}
+
+function deleteRowById_(sheet, id) {
+  const ids = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
+  for (let r = ids.length - 1; r >= 1; r--) {
+    if (ids[r][0] === id) {
+      sheet.deleteRow(r + 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+function readRows_(book, name, columns) {
+  const sheet = book.getSheetByName(name);
+  if (!sheet) return [];
+  const values = sheet.getDataRange().getValues();
+  const header = values[0].map(String);
+  const index = columns.map((c) => header.indexOf(c));
+  return values.slice(1).map((row) => {
+    const item = {};
+    columns.forEach((c, i) => (item[c] = index[i] >= 0 ? String(row[index[i]] == null ? '' : row[index[i]]) : ''));
+    return item;
+  });
 }
 
 function authorized_(props, given) {

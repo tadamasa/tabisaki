@@ -16,6 +16,8 @@ export const DISTANCES: Record<Mode, { km: number; label: string }[]> = {
   train: [50, 100, 200].map((km) => ({ km, label: `${km}km` })).concat({ km: 5000, label: "全国" }),
   bike: [10, 20, 40].map((km) => ({ km, label: `${km}km` })),
   walk: [3, 5, 10].map((km) => ({ km, label: `${km}km` })),
+  // 電車で行って現地で車を借りるので、遠くまで行ける
+  rent: [100, 200, 400].map((km) => ({ km, label: `${km}km` })).concat({ km: 5000, label: "全国" }),
 };
 
 // 市町村ごとの代表点（枠の中心）
