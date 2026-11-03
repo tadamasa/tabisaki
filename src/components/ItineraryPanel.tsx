@@ -19,6 +19,7 @@ import {
 import type { Origin } from "@/lib/origin";
 import { KIND } from "@/lib/kinds";
 import { FestivalBadge } from "./AreaPlacesPanel";
+import { GoogleHoursCheck, useGoogleEnabled } from "./GoogleInfo";
 import { LinkChips, placeTarget } from "./Links";
 import type { Place } from "@/lib/types";
 
@@ -169,6 +170,11 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
   const setBefore = (i: number, ids: string[]) => onChange(stops.map((s, k) => (k === i ? { ...s, before: ids } : s)));
   const toggleLink = (i: number) => onChange(stops.map((s, k) => (k === i ? { ...s, linkNext: !s.linkNext } : s)));
   const [notice, setNotice] = useState<string | null>(null);
+  // Google の営業時間で、着く時刻に開いているかを確かめる（押したときだけ読む）
+  const google = useGoogleEnabled();
+  const [checkHours, setCheckHours] = useState(false);
+  // day は 1 日目が 1
+  const dayDate = (day: number) => new Date(trip.getFullYear(), trip.getMonth(), trip.getDate() + day - 1);
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(null), 3000);
@@ -190,6 +196,11 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-sm font-semibold">{plan.days > 1 ? `${plan.days - 1}泊${plan.days}日の行程（目安）` : "日帰りの行程（目安）"}</h3>
         <span className="flex items-center gap-3 whitespace-nowrap text-xs">
+          {google && stops.length > 0 && !checkHours && (
+            <button type="button" onClick={() => setCheckHours(true)} className="text-museum underline">
+              営業時間を確かめる
+            </button>
+          )}
           {stops.length > 1 && (
             <button type="button" onClick={optimize} className="text-museum underline">
               近い順に並べ直す
@@ -264,6 +275,7 @@ export default function ItineraryPanel({ plan, home, origin, mode, onMode, tripD
                     </button>
                     <span className="ml-1 text-xs text-muted">{s.place.town}</span>
                     <FestivalBadge place={s.place} trip={trip} />
+                    {s.role !== "stay" && <GoogleHoursCheck place={s.place} date={dayDate(s.day)} arrive={s.arrive} depart={s.depart} check={checkHours} />}
                     <LinkChips target={placeTarget(s.place)} editable={false} />
                     <OrderRules
                       stop={s}

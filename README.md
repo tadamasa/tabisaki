@@ -18,6 +18,7 @@
 - 地帯の町で、この30日に話題になった祭り・催しのニュース見出しと、地帯の博物館・美術館の特別展・企画展の見出し（この60日）を出す（Google ニュースの検索 RSS）
 - 地帯の町ごとに、公式サイト（Wikidata）・観光パンフレットの検索・Wikipedia へのリンクを出す。社や館は地図に登録された公式サイトも出す
 - 町・社・館に、パンフレットや Google ドライブに保存した資料のリンクを「＋資料」で登録できる。縁泉スプレッドシートの links シートに保存し（[gas/ensen-api.gs](gas/ensen-api.gs)）、行程にも出す
+- 社・館・宿の「Googleの評価・営業時間」で、Google マップの評価（★と件数）、旅の日の曜日の営業時間（休みは赤）、写真、臨時休業・閉業の登録を出す。行程の「営業時間を確かめる」で、着く時刻に開いているか、滞在中に閉まらないかを地点ごとに知らせる。押したときだけ問い合わせる（`GOOGLE_PLACES_API_KEY` を設定したときだけ出る）
 - 地図の印は種類ごとのアイコン（⛩️🏛️🎨🏯ℹ️♨️）。配色は日本の伝統色
 - 「縁泉の最新の記録を読む」で、縁泉に追加した記録をすぐ反映（ふだんは1時間ごとに読み直す）。縁泉アプリで直したスポットの位置（spot_fixes）も重ねて読むので、位置を動かした場所は新しい位置の町で数え、「位置不明」にした場所は出さない
 
@@ -53,7 +54,7 @@ npm run dev
 ## 公開（Vercel）
 
 1. Vercel で「Add New → Project」から GitHub の `tadamasa/tabisaki` を選ぶ
-2. Environment Variables に `ENSEN_GAS_URL`、`ENSEN_GAS_TOKEN`、`HOME_LATLNG`、`APP_PASSWORD` を設定してデプロイする
+2. Environment Variables に `ENSEN_GAS_URL`、`ENSEN_GAS_TOKEN`、`HOME_LATLNG`、`APP_PASSWORD` を設定してデプロイする。Google の評価・営業時間を使うときは `GOOGLE_PLACES_API_KEY` も（Google Cloud で「Places API (New)」を有効にし、鍵の「API の制限」を Places API (New) だけにする。サーバーから呼ぶので「アプリケーションの制限」は「なし」のまま）
 3. 開くと合言葉を聞かれる。ユーザー名は何でもよく、パスワード欄に `APP_PASSWORD` を入れる
 
 ## データの出典
@@ -65,4 +66,5 @@ npm run dev
 - 市町村の公式サイト: [Wikidata](https://www.wikidata.org/)（CC0）の全国地方公共団体コード（P429）と公式サイト（P856）
 - 出発地の検索: [Nominatim](https://nominatim.org/)（© OpenStreetMap contributors、[利用方針](https://operations.osmfoundation.org/policies/nominatim/)に沿って押したときだけ問い合わせる）と[国土地理院の住所検索](https://msearch.gsi.go.jp/address-search/AddressSearch)。町の名前は端末の中だけで候補に出す
 - 話題の催し: [Google ニュース](https://news.google.com/)の検索 RSS。見出しを機械的に拾ったもので、日付の整ったイベント情報ではない。数時間キャッシュ
+- 評価・営業時間・写真: [Google Places API (New)](https://developers.google.com/maps/documentation/places/web-service/op-overview)（Text Search と Place Photos）。押したときだけ問い合わせ、結果は数日覚える。写真には撮影者の名前を添える
 - 祭神・社格・例祭: [Wikipedia 日本語版](https://ja.wikipedia.org/)の神社記事の基礎情報（CC BY-SA 4.0）。記事の座標が実際の場所から 1.5km 以内のときだけ同じ社とみなす
