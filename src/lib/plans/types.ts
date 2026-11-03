@@ -2,7 +2,7 @@ import type { Mode, Role } from "@/lib/plan/itinerary";
 import type { Origin } from "@/lib/origin";
 import type { Place } from "@/lib/types";
 
-// 保存した行程。縁泉スプレッドシートの plans シートの1行（data は JSON の文字列）
+// 保存した行程。旅先専用のスプレッドシートの plans シートの1行（data は JSON の文字列）
 export type SavedTrip = {
   plan_id: string;
   updated_at: string;
