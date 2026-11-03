@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AreaPlaces, Place } from "@/lib/types";
-import { DAY_END, INN_BY, blocksOf, driveMinutes, googleMapsLeg, googleMapsRoutes, nearPicks, nearPlan, travel, insertKin, optimizeOrder, roleFor, schedule, suggestPlan } from "./itinerary";
+import { DAY_END, INN_BY, blocksOf, legKey, driveMinutes, googleMapsLeg, googleMapsRoutes, nearPicks, nearPlan, travel, insertKin, optimizeOrder, roleFor, schedule, suggestPlan } from "./itinerary";
 
 const home: [number, number] = [135.5157, 34.7617];
 const place = (id: string, kind: Place["kind"], lng: number, lat: number, score = 0): Place => ({
@@ -234,4 +234,55 @@ test("まわりのおすすめは近い順に並べ、いちばん近いもの�
   assert.equal(stops.find((s) => s.role === "anchor")?.place.id, picks[0].place.id);
   assert.equal(schedule(stops, here, 9 * 60, 9 * 60, "walk").overMin, 0);
   assert.ok(!stops.some((s) => s.place.id === "遠い社"));
+});
+
+test("電車＋レンタカー: 借りる所まで電車、あとは車で回り、同じ所へ返して電車で帰る", () => {
+  const rental = place("駅前レンタカー", "rental", 135.8, 34.4);
+  assert.equal(roleFor(rental, []), "rent");
+  // 借りる所が後ろにあっても、先頭に回る
+  const p = schedule([{ place: main, role: "anchor" }, { place: rental, role: "rent" }], home, 8 * 60, undefined, "rent");
+  assert.deepEqual(p.stops.map((s) => [s.place.id, s.by]), [["駅前レンタカー", "train"], ["本命", "car"]]);
+  assert.equal(p.dropOff?.place.id, "駅前レンタカー");
+  assert.equal(p.returnBy, "train");
+  assert.equal(p.home, p.dropOff!.depart + p.returnMin);
+  // 並べ直しても借りる所は先頭のまま
+  const o = optimizeOrder([{ place: main, role: "anchor" }, { place: museum, role: "primer" }, { place: rental, role: "rent" }], home, 8 * 60, undefined, "rent");
+  assert.deepEqual(o.map((s) => s.place.id), ["駅前レンタカー", "資料館", "本命"]);
+  // 借りる所が決まっていなければ電車として数え、車のときは借りる所を数えない
+  assert.equal(schedule([{ place: main, role: "anchor" }], home, 8 * 60, undefined, "rent").stops[0].by, "train");
+  assert.equal(schedule([{ place: rental, role: "rent" }, { place: main, role: "anchor" }], home, 8 * 60, undefined, "car").stops.length, 1);
+});
+
+test("駐車場からつないだ地点は歩いて回り、つながりが切れたら車に戻る", () => {
+  const lot = place("駐車場", "parking", 135.865, 34.375);
+  const p = schedule(
+    [
+      { place: lot, role: "park", linkNext: true },
+      { place: main, role: "anchor", linkNext: true },
+      { place: kinNear, role: "kin" },
+      { place: kinSame, role: "kin" },
+    ],
+    home,
+  );
+  assert.deepEqual(p.stops.map((s) => s.by), ["car", "walk", "walk", "car"]);
+  // 歩いて車に戻る分は、次の区間に足す
+  const back = travel([kinNear.lng, kinNear.lat], [lot.lng, lot.lat], "walk").min;
+  assert.equal(p.stops[3].backMin, back);
+  assert.deepEqual(p.stops[3].from, [lot.lng, lot.lat]);
+  // 最後まで歩いて回ったら、帰りの前に車に戻る
+  const q = schedule([{ place: lot, role: "park", linkNext: true }, { place: main, role: "anchor" }], home);
+  assert.equal(q.returnBackMin, travel([main.lng, main.lat], [lot.lng, lot.lat], "walk").min);
+  // Google マップの車の経路には、歩いて回る地点を入れない
+  const url = new URL(googleMapsRoutes([{ place: lot, role: "park", linkNext: true }, { place: main, role: "anchor" }, { place: kinSame, role: "kin" }], home)[0].url);
+  assert.equal(url.searchParams.get("waypoints")!.split("|").length, 2);
+});
+
+test("実際の道で測った分があれば、目安の代わりに使う", () => {
+  const from: [number, number] = [main.lng, main.lat];
+  const to: [number, number] = [kinNear.lng, kinNear.lat];
+  const legs = new Map([[legKey("car", from, to), 42]]);
+  assert.equal(travel(from, to, "car", legs).min, 42);
+  assert.notEqual(travel(from, to, "car").min, 42);
+  // 電車は実際の道を使わない
+  assert.equal(travel(from, to, "train", new Map([[legKey("train", from, to), 1]])).min, travel(from, to, "train").min);
 });

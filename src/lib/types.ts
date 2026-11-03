@@ -59,7 +59,7 @@ export type Atlas = {
 
 export type Place = {
   id: string;
-  kind: "shrine" | "museum" | "art" | "castle" | "info" | "lodging";
+  kind: "shrine" | "museum" | "art" | "castle" | "info" | "lodging" | "rental" | "parking";
   name: string;
   lat: number;
   lng: number;

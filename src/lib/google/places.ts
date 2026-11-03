@@ -123,3 +123,78 @@ export async function googlePhotoUri(photoName: string, width: number): Promise<
   const { photoUri } = (await res.json()) as { photoUri: string };
   return photoUri;
 }
+
+// 乗り換えの拠点（レンタカーの店・駐車場）を近い順に探す。Nearby Search（名前と位置だけ）
+export type HubKind = "rental" | "parking";
+const HUB_TYPE: Record<HubKind, string> = { rental: "car_rental", parking: "parking" };
+const HUB_RADIUS: Record<HubKind, number> = { rental: 15_000, parking: 1_000 };
+
+export type Hub = { id: string; name: string; lat: number; lng: number; address: string };
+
+export async function findHubs(kind: HubKind, lat: number, lng: number): Promise<Hub[]> {
+  "use cache: remote";
+  cacheLife("days");
+  const k = key();
+  if (!k) throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
+  const res = await fetch(`${API}/places:searchNearby`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": k,
+      "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.shortFormattedAddress",
+    },
+    body: JSON.stringify({
+      includedTypes: [HUB_TYPE[kind]],
+      maxResultCount: 8,
+      rankPreference: "DISTANCE",
+      languageCode: "ja",
+      regionCode: "JP",
+      locationRestriction: { circle: { center: { latitude: lat, longitude: lng }, radius: HUB_RADIUS[kind] } },
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`Google Places API: HTTP ${res.status}`);
+  const { places = [] } = (await res.json()) as { places?: (RawPlace & { shortFormattedAddress?: string })[] };
+  return places
+    .filter((p) => p.location)
+    .map((p) => ({
+      id: p.id,
+      name: p.displayName?.text ?? (kind === "rental" ? "レンタカー" : "駐車場"),
+      lat: p.location!.latitude,
+      lng: p.location!.longitude,
+      address: p.shortFormattedAddress ?? "",
+    }));
+}
+
+// 車・歩きの区間を実際の道で測る（Routes API、渋滞を考えない Essentials）。分で返す
+const ROUTES = process.env.GOOGLE_ROUTES_API_URL ?? "https://routes.googleapis.com/directions/v2:computeRoutes";
+const TRAVEL_MODE = { car: "DRIVE", walk: "WALK" } as const;
+export type RouteMode = keyof typeof TRAVEL_MODE;
+
+export async function routeMinutes(mode: RouteMode, from: [number, number], to: [number, number]): Promise<number | null> {
+  "use cache: remote";
+  cacheLife("days");
+  const k = key();
+  if (!k) throw new Error("GOOGLE_PLACES_API_KEY が設定されていません");
+  const point = ([lng, lat]: [number, number]) => ({ location: { latLng: { latitude: lat, longitude: lng } } });
+  const res = await fetch(ROUTES, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": k, "X-Goog-FieldMask": "routes.duration,routes.distanceMeters" },
+    body: JSON.stringify({
+      origin: point(from),
+      destination: point(to),
+      travelMode: TRAVEL_MODE[mode],
+      ...(mode === "car" ? { routingPreference: "TRAFFIC_UNAWARE" } : {}),
+      languageCode: "ja",
+      regionCode: "JP",
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    const detail = ((await res.json().catch(() => null)) as { error?: { message?: string } } | null)?.error?.message;
+    throw new Error(`Google Routes API: HTTP ${res.status}${detail ? `（${detail}）` : ""}`);
+  }
+  const { routes = [] } = (await res.json()) as { routes?: { duration?: string }[] };
+  const sec = Number.parseInt(routes[0]?.duration ?? "", 10);
+  return Number.isFinite(sec) ? Math.max(1, Math.round(sec / 60)) : null;
+}

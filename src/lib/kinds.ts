@@ -22,4 +22,6 @@ export const KIND: Record<Place["kind"], { label: string; icon: string; color: s
   castle: { label: "城・城跡", icon: "🏯", color: HUE.hiwada, dot: "bg-castle" },
   info: { label: "観光案内所", icon: "ℹ️", color: HUE.ai, dot: "bg-museum" },
   lodging: { label: "宿", icon: "♨️", color: HUE.chitose, dot: "bg-inn" },
+  rental: { label: "レンタカー", icon: "🚙", color: HUE.nibi, dot: "bg-muted" },
+  parking: { label: "駐車場", icon: "🅿️", color: HUE.nibi, dot: "bg-muted" },
 };

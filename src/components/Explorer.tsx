@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_START2, type Mode, type Role, type Stop, nearPlan, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
+import { DEFAULT_START2, type LegTimes, type Mode, type Role, type Stop, legKey, nearPlan, optimizeOrder, roleFor, schedule, suggestPlan } from "@/lib/plan/itinerary";
 import { NEAR_AREA_PREFIX, NEAR_KM, nearArea, nearAreaId, parseNearId } from "@/lib/nearArea";
 import { KIND } from "@/lib/kinds";
 import { DISTANCES, type Origin, fromOrigin, townCenters } from "@/lib/origin";
@@ -65,10 +65,15 @@ function writeJson(key: string, value: unknown) {
 const readPlans = () => readJson<Record<string, SavedPlan>>(PLANS_KEY, {});
 const writePlans = (plans: Record<string, SavedPlan>) => writeJson(PLANS_KEY, plans);
 
+// Google で探したレンタカーの店・駐車場は地帯の候補にないので、行程に入れたものをこの端末に覚えておく
+const HUBS_KEY = "tabisaki:hubs";
+const readHubs = () => readJson<Record<string, Place>>(HUBS_KEY, {});
+
 const AREA_PLACE = (ap: AreaPlaces) =>
-  new Map<string, Place>(
-    [...ap.anchors, ...ap.primers, ...(ap.halls ?? []), ...(ap.castles ?? []), ...(ap.lodgings ?? [])].map((p) => [p.id, p]),
-  );
+  new Map<string, Place>([
+    ...Object.entries(readHubs()),
+    ...[...ap.anchors, ...ap.primers, ...(ap.halls ?? []), ...(ap.castles ?? []), ...(ap.lodgings ?? [])].map((p) => [p.id, p] as [string, Place]),
+  ]);
 
 // 開きそうな地帯の候補を先に取っておく数。OpenStreetMap に一度にたくさん問い合わせないよう、1つずつ順に取る
 const PREFETCH_COUNT = 3;
@@ -127,6 +132,8 @@ function ExplorerView() {
     const [y, m, d] = (tripDate || "1970-01-01").split("-").map(Number);
     return new Date(y, m - 1, d);
   }, [tripDate]);
+  // 実際の道で測った区間の分（Google の経路）。区間ごとに覚えるので、並べ替えても使える
+  const [legTimes, setLegTimes] = useState<LegTimes>(() => new Map());
   const [mode, setMode] = useState<Mode>(() => (typeof window === "undefined" ? "car" : readJson<Mode>(MODE_KEY, "car")));
   const chooseOrigin = (o: Origin | null) => {
     setAway(o);
@@ -247,7 +254,7 @@ function ExplorerView() {
       : loaded.areaId.startsWith(NEAR_AREA_PREFIX)
         ? nearPlan(loaded, from, start, mode, start2)
         : suggestPlan(loaded, from, undefined, start, mode);
-  const plan = loaded ? schedule(stops, from, start, start2, mode) : null;
+  const plan = loaded ? schedule(stops, from, start, start2, mode, legTimes) : null;
 
   const savePlan = (next: Stop[] | null, nextStart = start, nextStart2 = start2) => {
     if (!loaded) return;
@@ -271,21 +278,53 @@ function ExplorerView() {
     if (stops.some((s) => s.place.id === p.id)) return savePlan(without(stops, (s) => s.place.id === p.id));
     const role = roleFor(p, stops);
     const base = role === "stay" ? without(stops, (s) => s.role === "stay") : stops;
-    savePlan(optimizeOrder([...base, { place: p, role }], from, start, start2, mode));
+    savePlan(optimizeOrder([...base, { place: p, role }], from, start, start2, mode, legTimes));
   };
   // 本命を選び直しても、決めてある宿はそのまま残す
   const makeAnchor = (p: Place) => {
     if (!loaded) return;
     const stay = stops.find((s) => s.role === "stay");
     const next = suggestPlan(loaded, from, p.id, start, mode);
-    savePlan(stay ? optimizeOrder([...next, { place: stay.place, role: "stay" }], from, start, start2, mode) : next);
+    savePlan(stay ? optimizeOrder([...next, { place: stay.place, role: "stay" }], from, start, start2, mode, legTimes) : next);
   };
   const reorder = () => {
-    const next = optimizeOrder(stops, from, start, start2, mode);
+    const next = optimizeOrder(stops, from, start, start2, mode, legTimes);
     const changed = next.some((s, i) => s.place.id !== stops[i].place.id);
     savePlan(next);
     return changed;
   };
+  // レンタカーを借りる所は1か所だけ（選び直すと入れ替わる）。駐車場は、選んだ地点のすぐ前に入れて、その地点とつなぐ
+  const addHub = (p: Place, beforeId?: string) => {
+    const hubs = readHubs();
+    hubs[p.id] = p;
+    writeJson(HUBS_KEY, hubs);
+    if (p.kind === "rental") return savePlan([{ place: p, role: "rent" }, ...without(stops, (s) => s.role === "rent")]);
+    const i = stops.findIndex((s) => s.place.id === beforeId);
+    const lot: Stop = { place: p, role: "park", linkNext: true };
+    const rest = stops.filter((s) => s.place.id !== p.id);
+    const at = i < 0 ? rest.length : rest.findIndex((s) => s.place.id === beforeId);
+    savePlan([...rest.slice(0, at), lot, ...rest.slice(at)]);
+  };
+  // 行程の車・歩きの区間を、Google の Routes API で測り直す。測れた区間だけ置き換える
+  const measureRoutes = async () => {
+    if (!plan) return "行程がありません";
+    const legs = plan.legs.filter((l) => (l.by === "car" || l.by === "walk") && !legTimes.has(legKey(l.by, l.from, l.to)));
+    if (!legs.length) return null;
+    try {
+      const res = await fetch("/api/google/routes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ legs }) });
+      const body = (await res.json()) as { minutes?: (number | null)[]; error?: string };
+      if (!res.ok || !body.minutes) return body.error ?? `HTTP ${res.status}`;
+      setLegTimes((prev) => {
+        const next = new Map(prev);
+        legs.forEach((l, i) => body.minutes![i] != null && next.set(legKey(l.by, l.from, l.to), body.minutes![i]!));
+        return next;
+      });
+      return body.minutes.some((m) => m == null) ? "一部の区間は測れず、目安のままです" : null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  };
+  const measured = !!plan && plan.legs.some((l) => legTimes.has(legKey(l.by, l.from, l.to)));
   const planIds = new Set(stops.map((s) => s.place.id));
   const anchorId = stops.find((s) => s.role === "anchor")?.place.id ?? null;
   const selectArea = (id: string | null) => {
@@ -399,6 +438,9 @@ function ExplorerView() {
                     onReset={() => savePlan(null)}
                     onOptimize={reorder}
                     onFocus={setFocus}
+                    onAddHub={addHub}
+                    onMeasure={measureRoutes}
+                    measured={measured}
                   />
                 ) : (
                   <AreaPlacesPanel state={selectedPlaces} trip={trip} home={from} onNearPlan={() => savePlan(null)} onRetry={() => retryPlaces(selected.id)} onFocus={setFocus} planIds={planIds} anchorId={anchorId} onToggle={togglePlace} onMakeAnchor={makeAnchor} />
