@@ -135,7 +135,7 @@ function ExplorerView() {
     const [y, m, d] = (tripDate || "1970-01-01").split("-").map(Number);
     return new Date(y, m - 1, d);
   }, [tripDate]);
-  // 縁泉スプレッドシートに保存した行程（どの端末からも開ける）。current は今開いている保存済みの行程
+  // 旅先専用のスプレッドシートに保存した行程（どの端末からも開ける）。current は今開いている保存済みの行程
   const [trips, setTrips] = useState<SavedTrip[]>([]);
   const [tripsError, setTripsError] = useState<string | null>(null);
   const [currentTrip, setCurrentTrip] = useState<SavedTrip | null>(null);

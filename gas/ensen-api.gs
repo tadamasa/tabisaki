@@ -25,7 +25,8 @@
  *   url          資料の URL（Google ドライブの共有リンクなど）
  *   note         メモ
  *
- * plans シート（はじめて行程を保存したときに作る）。tabisaki で組んだ行程を、あとで開いて直せるように置く
+ * plans シート（はじめて行程を保存したときに作る）。tabisaki で組んだ行程を、あとで開いて直せるように置く。
+ *   縁泉スプレッドシートには置かない。旅先専用のスプレッドシート（PLANS_SHEET_ID、なければ自動で「tabisaki 行程」を作る）に置く
  *   plan_id      一意の id
  *   updated_at   保存した日時（ISO 8601）
  *   title        行程の名前
@@ -44,7 +45,7 @@ function doGet(e) {
   if (!authorized_(props, e && e.parameter && e.parameter.token)) return json_({ error: 'unauthorized' });
   const book = SpreadsheetApp.openById(props.getProperty('SHEET_ID'));
   if (e.parameter.action === 'links') return json_({ links: readLinks_(book) });
-  if (e.parameter.action === 'plans') return json_({ plans: readRows_(book, 'plans', PLAN_COLUMNS) });
+  if (e.parameter.action === 'plans') return json_({ plans: readPlans_(props) });
 
   const sheet = book.getSheetByName('events');
   const values = sheet.getDataRange().getDisplayValues();
@@ -130,9 +131,9 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    if (body.action === 'savePlan') return json_({ plan: savePlan_(book, body.plan || {}) });
+    if (body.action === 'savePlan') return json_({ plan: savePlan_(planBook_(props), body.plan || {}) });
     if (body.action === 'deletePlan') {
-      const sheet = book.getSheetByName('plans');
+      const sheet = planBook_(props).getSheetByName('plans');
       if (sheet && deleteRowById_(sheet, body.plan_id)) return json_({ deleted: body.plan_id });
       return json_({ error: 'not found' });
     }
@@ -159,6 +160,26 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// 行程の置き場は縁泉スプレッドシートではなく、旅先専用のスプレッドシート（縁泉へ書き戻すのは資料リンクだけ）。
+// スクリプト プロパティ PLANS_SHEET_ID があればそれを、このスクリプトがスプレッドシートに付いていればそれを使う。
+// どちらもなければ、はじめて保存したときに「tabisaki 行程」を自分のドライブに作り、その ID を PLANS_SHEET_ID に覚える
+// 読むだけのときは、まだ置き場がなければ作らずに空を返す
+function readPlans_(props) {
+  const id = props.getProperty('PLANS_SHEET_ID');
+  const book = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  return book ? readRows_(book, 'plans', PLAN_COLUMNS) : [];
+}
+
+function planBook_(props) {
+  const id = props.getProperty('PLANS_SHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+  const bound = SpreadsheetApp.getActiveSpreadsheet();
+  if (bound) return bound;
+  const book = SpreadsheetApp.create('tabisaki 行程');
+  props.setProperty('PLANS_SHEET_ID', book.getId());
+  return book;
 }
 
 function savePlan_(book, plan) {

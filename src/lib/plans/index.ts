@@ -3,13 +3,13 @@ import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import type { SavedTrip } from "./types";
 
-// 保存した行程は縁泉スプレッドシートの plans シートに置き、どの端末からも開けるようにする。
+// 保存した行程は旅先専用のスプレッドシート（tabisaki 行程）の plans シートに置き、どの端末からも開けるようにする。縁泉スプレッドシートには置かない。
 // Apps Script がないローカル開発では PLANS_FILE（JSON）に置く
 const { ENSEN_GAS_URL, ENSEN_GAS_TOKEN } = process.env;
 const PLANS_FILE = process.env.PLANS_FILE ?? ".plans.local.json";
 const viaGas = () => !!(ENSEN_GAS_URL && ENSEN_GAS_TOKEN);
 // 古い Apps Script は行程の保存を知らない（plans の代わりに events を返し、POST には unknown action を返す）
-const OUTDATED = "縁泉の Apps Script を新しい版に差し替えてください（手順書「行程を縁泉スプレッドシートに保存する」）";
+const OUTDATED = "縁泉の Apps Script を新しい版に差し替えてください（手順書「B. 行程の保存のために Apps Script を差し替える」）";
 
 async function readLocal(): Promise<SavedTrip[]> {
   try {
